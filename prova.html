@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App Posizionamento Bollini - AI Chat & Tabelle Editabili (v5.6)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .drawing-area {
+            position: relative;
+            width: 100%; 
+            height: 60vh; 
+            overflow: hidden; 
+            background-color: #2d3748; 
+            border: 1px solid #4b5563;
+            border-radius: 0.375rem; 
+            margin: auto;
+        }
+        #drawingCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: auto; 
+            cursor: default;
+        }
+        #drawingCanvas.panning-cursor { cursor: grab; }
+        #drawingCanvas.panning-active-cursor { cursor: grabbing; }
+        #drawingCanvas.crosshair-mode-active { cursor: none; } 
+        #drawingCanvas.cell-cursor { cursor: cell; }
+        #drawingCanvas.delete-mode.over-bollino,
+        #drawingCanvas.draggable-bollino-hover {
+             cursor: pointer;
+        }
+        #drawingCanvas.dragging-bollino {
+            cursor: grabbing;
+        }
+
+        #drawingImage { 
+            display: none;
+        }
+        .table-container, .custom-table-container {
+            max-height: 220px; /* Leggermente ridotto per fare spazio al nuovo pulsante export */
+            overflow-y: auto;
+            border: 1px solid #4b5563;
+            border-radius: 0.375rem;
+            margin-bottom: 0.5rem; /* Ridotto mb per il pulsante sotto */
+        }
+        .selected-row {
+            background-color: #4a5568 !important;
+            font-weight: 600;
+        }
+        .selected-row td {
+            color: #e2e8f0 !important;
+        }
+        .info-box {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(17, 24, 39, 0.9);
+            color: #e5e7eb;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 0.9em;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            max-width: 90%;
+        }
+        .scale-display {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background-color: rgba(17, 24, 39, 0.9);
+            color: #e5e7eb;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.8em;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+         #loader, #aiChatLoader {
+            border: 6px solid #4b5563;
+            border-top: 6px solid #3b82f6;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+            z-index: 1500; 
+        }
+        #loader { width: 60px; height: 60px; }
+
+        @keyframes spin {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.75);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        .modal-content {
+            background-color: #1f2937;
+            color: #e5e7eb;
+            padding: 25px 30px;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.4);
+            text-align: center;
+            width: 90%;
+            max-width: 400px;
+        }
+        #aiChatModal .modal-content {
+            max-width: 700px; height: 80vh; display: flex; flex-direction: column;
+        }
+        .file-input-container {
+            border: 2px dashed #4b5563; padding: 15px; border-radius: 8px; background-color: #374151; 
+        }
+        
+        .controls-section {
+            margin-bottom: 1rem; 
+        }
+        .controls-section h3 {
+             font-size: 0.9rem; 
+             font-weight: 600; 
+             color: #d1d5db; 
+             margin-bottom: 0.5rem; 
+             text-align: left;
+        }
+        .button-group {
+            display: flex;
+            flex-wrap: wrap; 
+            gap: 0.5rem; 
+            margin-bottom: 0.75rem; 
+        }
+        .button-group button, .controls-group button, .export-button { /* Aggiunto .export-button per stile comune */
+            background-color: #4b5563; 
+            color: white;
+            font-weight: 600; 
+            padding: 0.375rem 0.75rem; 
+            border-radius: 0.375rem; 
+            transition: background-color 0.15s ease-in-out;
+            font-size: 0.8rem; 
+            line-height: 1.25rem; 
+            flex-grow: 1; 
+        }
+        .button-group button:hover, .controls-group button:hover, .export-button:hover {
+            background-color: #5a6678; 
+        }
+         .button-group button:disabled, .controls-group button:disabled, .export-button:disabled {
+            background-color: #374151; 
+            color: #9ca3af; 
+            cursor: not-allowed;
+        }
+         .button-group button.active-mode-btn { 
+            background-color: #f59e0b; border-color: #d97706;
+        }
+        .button-group button.active-mode-btn:hover {
+            background-color: #d97706;
+        }
+        .export-button.emerald { background-color: #059669; } /* Stile specifico per export quote CSV */
+        .export-button.emerald:hover { background-color: #047857; }
+        .export-button.sky { background-color: #0ea5e9; } /* Stile specifico per export tabella custom */
+        .export-button.sky:hover { background-color: #0284c7; }
+
+
+        #labelInputModal .modal-content, #sequentialLabelInputModal .modal-content, #calibrateScaleModal .modal-content { text-align: left; }
+        #labelInputModal input[type="text"], #sequentialLabelInputModal input[type="text"],
+        #sequentialLabelInputModal input[type="number"], #calibrateScaleModal input[type="number"],
+        #calibrateScaleModal input[type="text"], #aiChatPromptInput {
+            width: 100%; padding: 10px 12px; margin-bottom: 15px; border: 1px solid #4b5563;
+            border-radius: 6px; font-size: 1rem; background-color: #374151; color: #e5e7eb;
+        }
+        #labelInputModal input[type="text"]::placeholder, #sequentialLabelInputModal input[type="text"]::placeholder,
+        #sequentialLabelInputModal input[type="number"]::placeholder, #calibrateScaleModal input[type="number"]::placeholder,
+        #calibrateScaleModal input[type="text"]::placeholder, #aiChatPromptInput::placeholder { color: #9ca3af; }
+
+        .dark-file-input::-webkit-file-upload-button {
+            background-color: #4f46e5; color: white; border: none; padding: 0.5rem 1rem; 
+            border-radius: 0.375rem; font-size: 0.8rem; font-weight: 600; margin-right: 0.75rem;
+            cursor: pointer; transition: background-color 0.15s ease-in-out;
+        }
+        .dark-file-input::-webkit-file-upload-button:hover { background-color: #4338ca; }
+        .dark-file-input-green::-webkit-file-upload-button {
+            background-color: #059669; color: white; border: none; padding: 0.5rem 1rem; 
+            border-radius: 0.375rem; font-size: 0.8rem; font-weight: 600; margin-right: 0.75rem;
+            cursor: pointer; transition: background-color 0.15s ease-in-out;
+        }
+        .dark-file-input-green::-webkit-file-upload-button:hover { background-color: #047857; }
+        .dark-file-input { color: #9ca3af; font-size: 0.9rem; }
+
+        #aiChatDisplay {
+            flex-grow: 1; overflow-y: auto; padding: 10px; background-color: #2d3748;
+            border-radius: 8px; margin-bottom: 10px; border: 1px solid #4a5568;
+        }
+        .chat-message {
+            padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; max-width: 85%;
+            word-wrap: break-word; display: flex; flex-direction: column;
+        }
+        .chat-message.user { background-color: #4f46e5; color: white; margin-left: auto; align-items: flex-end; }
+        .chat-message.ai { background-color: #374151; color: #e5e7eb; margin-right: auto; align-items: flex-start; }
+        .chat-message.error { background-color: #c53030; color: white; text-align: center; align-items: center; }
+        .chat-message img { max-width: 200px; max-height: 200px; border-radius: 4px; margin-top: 5px; border: 1px solid #4a5568; }
+        #aiChatImagePreviewContainer { margin-bottom: 10px; text-align: center; position: relative; }
+        #aiChatImagePreview { max-width: 150px; max-height: 100px; border-radius: 4px; border: 1px solid #4b5563; }
+        #removeAiChatImageButton {
+            position: absolute; top: -8px; right: calc(50% - 85px); background-color: rgba(200, 50, 50, 0.8);
+            color: white; border: none; border-radius: 50%; width: 24px; height: 24px;
+            font-size: 14px; line-height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+        }
+        #aiChatInputContainer { display: flex; gap: 10px; align-items: center; }
+        #aiChatPromptInput { flex-grow: 1; margin-bottom: 0; resize: none; min-height: 44px; }
+        #attachAiFileButton { background: none; border: none; color: #9ca3af; font-size: 1.5rem; cursor: pointer; padding: 5px; }
+        #attachAiFileButton:hover { color: #e5e7eb; }
+        #sendAiPromptButton { padding: 10px 18px; }
+        #aiChatFileInput { display: none; }
+
+        .controls-group {
+            display: flex;
+            gap: 0.5rem; 
+            margin-bottom: 0.5rem; 
+            justify-content: center;
+            align-items: center;
+        }
+       
+        .controls-group .label {
+            font-size: 0.8rem; 
+            color: #d1d5db; 
+            margin-right: 0.25rem; 
+        }
+        .table-container th, .table-container td,
+        .custom-table-container th, .custom-table-container td {
+            padding: 0.375rem 0.5rem; 
+            font-size: 0.8rem;
+            border: 1px solid #4b5563;
+        }
+        .table-container td[contenteditable="true"], 
+        .custom-table-container td[contenteditable="true"] { 
+            background-color: #374151;
+        }
+        .table-container td[contenteditable="true"]:focus,
+        .custom-table-container td[contenteditable="true"]:focus {
+            background-color: #4b5563;
+            outline: 1px solid #60a5fa;
+        }
+        .delete-row-btn {
+            background-color: #ef4444; 
+            color: white;
+            padding: 0.25rem 0.5rem; 
+            border-radius: 0.25rem; 
+            font-size: 0.75rem; 
+        }
+        .delete-row-btn:hover {
+            background-color: #dc2626; 
+        }
+
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-300 p-3 md:p-4"> 
+    <div class="container mx-auto bg-gray-800 p-4 md:p-6 rounded-xl shadow-2xl"> 
+        <header class="mb-6 text-center">
+            <img src="https://placehold.co/400x70/2d3748/9ca3af?text=Annotazioni+Tecniche+Precisione" alt="Banner Annotazioni Tecniche e Precisione" class="mx-auto mb-3 rounded-lg shadow-md" style="max-width: 350px; height: auto;">
+            <h1 class="text-xl md:text-3xl font-bold text-white">App Posizionamento Bollini & Dati (v5.6)</h1> 
+            <p class="text-gray-400 mt-1 text-xs md:text-sm">Carica, annota, misura, esporta e gestisci dati.</p> 
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4"> 
+            <div class="file-input-container">
+                <label for="imageUpload" class="block text-xs font-medium text-gray-300 mb-1">1. Carica Disegno (Immagine):</label>
+                <input type="file" id="imageUpload" accept="image/*" class="block w-full text-sm dark-file-input"/>
+                <p id="imageUploadError" class="text-red-500 text-xs mt-1"></p>
+            </div>
+            <div class="file-input-container">
+                <label for="csvUpload" class="block text-xs font-medium text-gray-300 mb-1">2. Carica Quote Bollini (CSV - Opz.):</label>
+                <input type="file" id="csvUpload" accept=".csv" class="block w-full text-sm dark-file-input-green"/>
+                <p id="csvUploadError" class="text-red-500 text-xs mt-1"></p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4"> 
+            <div class="md:col-span-2 bg-gray-750 p-2 md:p-3 rounded-lg shadow-md"> 
+                <h2 class="text-md md:text-lg font-semibold text-gray-100 mb-2 text-center">Disegno</h2> 
+                <div class="controls-group">
+                    <span class="label">Zoom:</span>
+                    <button id="zoomOutButton" title="Zoom Out"><i class="fas fa-search-minus"></i></button>
+                    <button id="resetZoomButton" title="Reset Zoom"><i class="fas fa-expand"></i></button>
+                    <button id="zoomInButton" title="Zoom In"><i class="fas fa-search-plus"></i></button>
+                </div>
+                <div class="controls-group mb-2">
+                    <span class="label">Dim. Bollini:</span>
+                    <button id="bollinoSizeDecreaseButton" title="Riduci Bollini"><i class="fas fa-minus-circle"></i></button>
+                    <button id="bollinoSizeResetButton" title="Reset Dim. Bollini"><i class="fas fa-circle"></i></button>
+                    <button id="bollinoSizeIncreaseButton" title="Ingrandisci Bollini"><i class="fas fa-plus-circle"></i></button>
+                </div>
+                <div id="drawingArea" class="drawing-area">
+                    <img id="drawingImage" src="https://placehold.co/800x600/374151/9ca3af?text=Carica+un+disegno" alt="Disegno Tecnico Sorgente"/>
+                    <canvas id="drawingCanvas"></canvas>
+                    <div id="loader"></div> 
+                </div>
+                 <div id="imageError" class="text-center text-red-500 mt-1 text-xs"></div> 
+            </div>
+
+            <div class="md:col-span-1 bg-gray-750 p-2 md:p-3 rounded-lg shadow-md flex flex-col"> 
+                <h2 class="text-md md:text-lg font-semibold text-gray-100 mb-2">Controlli</h2> 
+                <div class="controls-section">
+                    <h3>Strumenti Disegno</h3>
+                    <div class="button-group">
+                        <button id="toggleCalibrateScaleModeButton" title="Definisci una scala basata su una quota nota"><i class="fas fa-ruler-combined mr-1"></i>Calibra Scala</button>
+                        <button id="toggleMeasureDistanceModeButton" title="Misura distanze sul disegno (richiede calibrazione)"><i class="fas fa-drafting-compass mr-1"></i>Misura Dist.</button>
+                    </div>
+                </div>
+
+                <div class="controls-section">
+                    <h3>Modalità Annotazione</h3>
+                    <div class="button-group">
+                        <button id="toggleFreeAnnotationModeButton" title="Aggiungi bollini con etichetta personalizzata"><i class="fas fa-paint-brush mr-1"></i>Pall. Libera</button>
+                        <button id="toggleSequentialAnnotationModeButton" title="Aggiungi bollini con etichetta numerica sequenziale"><i class="fas fa-list-ol mr-1"></i>Pall. Seq.</button>
+                        <button id="toggleDeleteModeButton" title="Rimuovi bollini cliccandoli"><i class="fas fa-eraser mr-1"></i>Cancella Boll.</button>
+                    </div>
+                </div>
+                
+                <hr class="border-gray-600 my-2"> 
+                <div id="csvQuotesSection" class="controls-section">
+                    <h3>Quote da CSV (Editabile)</h3>
+                    <div id="tablePlaceholder" class="text-center text-gray-400 py-2 text-xs flex-grow">Carica un CSV per le quote o usa la pallinatura.</div>
+                    <div class="table-container" style="display: none;">
+                        <table class="min-w-full divide-y divide-gray-700">
+                            <thead class="bg-gray-650 sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Lettera</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Testo Quota</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Tolleranza</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Misurato</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dimensionsTableBody" class="bg-gray-700 divide-y divide-gray-600">
+                            </tbody>
+                        </table>
+                    </div>
+                    <button id="exportCsvQuotesButton" class="export-button emerald w-full mt-1"><i class="fas fa-file-csv mr-1"></i>Esporta Quote CSV</button>
+                </div>
+
+                <hr class="border-gray-600 my-2">
+
+                <div id="customDataSection" class="controls-section">
+                    <h3>Tabella Dati Personalizzata</h3>
+                    <div class="button-group mb-2">
+                        <button id="addCustomTableRowButton" class="bg-green-600 hover:bg-green-700"><i class="fas fa-plus-circle mr-1"></i>Aggiungi Riga</button>
+                        <button id="clearCustomTableButton" class="bg-red-600 hover:bg-red-700"><i class="fas fa-trash-alt mr-1"></i>Svuota Tabella</button>
+                    </div>
+                    <div id="customTablePlaceholder" class="text-center text-gray-400 py-2 text-xs">Aggiungi righe per inserire i tuoi dati.</div>
+                    <div class="custom-table-container" style="display: none;">
+                        <table id="customDataTable" class="min-w-full divide-y divide-gray-700">
+                            <thead id="customDataTableHead" class="bg-gray-650 sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ID/Etichetta</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Descrizione</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Note</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Azione</th>
+                                </tr>
+                            </thead>
+                            <tbody id="customDataTableBody" class="bg-gray-700 divide-y divide-gray-600">
+                            </tbody>
+                        </table>
+                    </div>
+                     <button id="exportCustomTableButton" class="export-button sky w-full mt-1"><i class="fas fa-file-csv mr-1"></i>Esporta Tabella Custom</button>
+                </div>
+
+                <hr class="border-gray-600 my-2">
+
+                <div class="controls-section">
+                    <h3>Azioni Generali</h3>
+                     <div class="button-group">
+                        <button id="exportButton"><i class="fas fa-camera-retro mr-1"></i>Esporta Disegno</button>
+                        <button id="exportDataButton"><i class="fas fa-file-export mr-1"></i>Esporta Bollini</button>
+                        <button id="clearBolliniButton"><i class="fas fa-broom mr-1"></i>Canc. Tutti Bollini</button>
+                        <button id="openAiChatButton" class="bg-indigo-600 hover:bg-indigo-700"><i class="fas fa-comments mr-1"></i>Chat AI</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+         <div id="infoBox" class="info-box" style="display: none;"></div>
+         <div id="scaleDisplay" class="scale-display" style="display: none;">Scala non calibrata | Zoom: 100% | Dim. Bollini: 100%</div>
+    </div>
+
+    <div id="confirmClearModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-lg font-semibold text-gray-100 mb-3">Conferma Cancellazione</h3>
+            <p id="confirmClearModalText" class="text-gray-400 mb-5 text-sm">Procedere?</p>
+            <div class="flex justify-center gap-4">
+                <button id="confirmClearYes" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-5 rounded-lg text-sm transition duration-150">Sì</button>
+                <button id="confirmClearNo" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-5 rounded-lg text-sm transition duration-150">Annulla</button>
+            </div>
+        </div>
+    </div>
+    <div id="labelInputModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-lg font-semibold text-gray-100 mb-4">Inserisci Etichetta Bollino</h3>
+            <input type="text" id="bollinoLabelInput" placeholder="Es. A1, Nota, X..." class="mb-4">
+            <div class="flex justify-end gap-3">
+                <button id="confirmLabelButton" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Conferma</button>
+                <button id="cancelLabelButton" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Annulla</button>
+            </div>
+        </div>
+    </div>
+    <div id="sequentialLabelInputModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-lg font-semibold text-gray-100 mb-4">Imposta Pallinatura Sequenziale</h3>
+            <div>
+                <label for="sequentialPrefixInput" class="block text-sm font-medium text-gray-300 mb-1">Prefisso Etichetta (Opzionale):</label>
+                <input type="text" id="sequentialPrefixInput" placeholder="Es. A, PT-" class="mb-3">
+            </div>
+            <div>
+                <label for="sequentialStartNumberInput" class="block text-sm font-medium text-gray-300 mb-1">Numero Iniziale:</label>
+                <input type="number" id="sequentialStartNumberInput" value="1" min="0" class="mb-4">
+            </div>
+            <div class="flex justify-end gap-3">
+                <button id="confirmSequentialLabelButton" class="bg-teal-500 hover:bg-teal-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Avvia Sequenza</button>
+                <button id="cancelSequentialLabelButton" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Annulla</button>
+            </div>
+        </div>
+    </div>
+    <div id="calibrateScaleModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-lg font-semibold text-gray-100 mb-4">Inserisci Valore Reale Quota</h3>
+            <div>
+                <label for="realDimensionInput" class="block text-sm font-medium text-gray-300 mb-1">Misura Reale della Quota Selezionata:</label>
+                <input type="number" id="realDimensionInput" placeholder="Es. 20.5" step="any" class="mb-3">
+            </div>
+            <div>
+                <label for="unitInput" class="block text-sm font-medium text-gray-300 mb-1">Unità di Misura:</label>
+                <input type="text" id="unitInput" value="mm" placeholder="Es. mm, cm, in" class="mb-4">
+            </div>
+            <div class="flex justify-end gap-3">
+                <button id="confirmCalibrationButton" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Calibra</button>
+                <button id="cancelCalibrationButton" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Annulla</button>
+            </div>
+        </div>
+    </div>
+    <div id="aiChatModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-xl font-semibold text-gray-100 mb-4">Chat con Assistente AI</h3>
+            <div id="aiChatDisplay"></div>
+            <div id="aiChatImagePreviewContainer" style="display: none;">
+                <img id="aiChatImagePreview" src="#" alt="Anteprima Immagine"/>
+                <button id="removeAiChatImageButton" title="Rimuovi immagine">&times;</button>
+            </div>
+            <div id="aiChatLoader" style="position: relative; margin: 10px auto;"></div>
+            <div id="aiChatInputContainer">
+                <input type="file" id="aiChatFileInput" accept="image/*">
+                <button id="attachAiFileButton" title="Allega immagine"><i class="fas fa-paperclip"></i></button>
+                <textarea id="aiChatPromptInput" placeholder="Scrivi il tuo prompt qui..." rows="2"></textarea>
+                <button id="sendAiPromptButton" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold rounded-lg text-sm transition duration-150">Invia</button>
+            </div>
+            <button id="closeAiChatButton" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-4 rounded-lg text-sm transition duration-150 mt-4 w-full">Chiudi Chat</button>
+        </div>
+    </div>
+
+    <script>
+        // Elementi DOM
+        const imageUpload = document.getElementById('imageUpload');
+        const csvUpload = document.getElementById('csvUpload');
+        const drawingImage = document.getElementById('drawingImage'); 
+        const drawingArea = document.getElementById('drawingArea');
+        const drawingCanvas = document.getElementById('drawingCanvas');
+        const dimensionsTableBody = document.getElementById('dimensionsTableBody');
+        const tableContainer = document.querySelector('#csvQuotesSection .table-container'); 
+        const tablePlaceholder = document.getElementById('tablePlaceholder');
+        const imageUploadError = document.getElementById('imageUploadError');
+        const csvUploadError = document.getElementById('csvUploadError');
+        const imageError = document.getElementById('imageError');
+        const clearBolliniButton = document.getElementById('clearBolliniButton');
+        const exportButton = document.getElementById('exportButton'); // Esporta Disegno
+        const exportDataButton = document.getElementById('exportDataButton'); // Esporta Dati Bollini (quelli sul disegno)
+        const exportCsvQuotesButton = document.getElementById('exportCsvQuotesButton'); // NUOVO: Esporta tabella quote CSV
+        const infoBox = document.getElementById('infoBox');
+        const scaleDisplay = document.getElementById('scaleDisplay');
+        const loader = document.getElementById('loader');
+        const toggleDeleteModeButton = document.getElementById('toggleDeleteModeButton');
+        const toggleFreeAnnotationModeButton = document.getElementById('toggleFreeAnnotationModeButton');
+        const toggleSequentialAnnotationModeButton = document.getElementById('toggleSequentialAnnotationModeButton');
+        const toggleCalibrateScaleModeButton = document.getElementById('toggleCalibrateScaleModeButton');
+        const toggleMeasureDistanceModeButton = document.getElementById('toggleMeasureDistanceModeButton');
+        
+        const zoomInButton = document.getElementById('zoomInButton');
+        const zoomOutButton = document.getElementById('zoomOutButton');
+        const resetZoomButton = document.getElementById('resetZoomButton');
+        const bollinoSizeIncreaseButton = document.getElementById('bollinoSizeIncreaseButton');
+        const bollinoSizeDecreaseButton = document.getElementById('bollinoSizeDecreaseButton');
+        const bollinoSizeResetButton = document.getElementById('bollinoSizeResetButton');
+
+        const confirmClearModal = document.getElementById('confirmClearModal');
+        const confirmClearModalText = document.getElementById('confirmClearModalText');
+        const confirmClearYes = document.getElementById('confirmClearYes');
+        const confirmClearNo = document.getElementById('confirmClearNo');
+        const labelInputModal = document.getElementById('labelInputModal');
+        const bollinoLabelInput = document.getElementById('bollinoLabelInput');
+        const confirmLabelButton = document.getElementById('confirmLabelButton');
+        const cancelLabelButton = document.getElementById('cancelLabelButton');
+        const sequentialLabelInputModal = document.getElementById('sequentialLabelInputModal');
+        const sequentialPrefixInput = document.getElementById('sequentialPrefixInput');
+        const sequentialStartNumberInput = document.getElementById('sequentialStartNumberInput');
+        const confirmSequentialLabelButton = document.getElementById('confirmSequentialLabelButton');
+        const cancelSequentialLabelButton = document.getElementById('cancelSequentialLabelButton');
+        const calibrateScaleModal = document.getElementById('calibrateScaleModal');
+        const realDimensionInput = document.getElementById('realDimensionInput');
+        const unitInput = document.getElementById('unitInput');
+        const confirmCalibrationButton = document.getElementById('confirmCalibrationButton');
+        const cancelCalibrationButton = document.getElementById('cancelCalibrationButton');
+        const openAiChatButton = document.getElementById('openAiChatButton');
+        const aiChatModal = document.getElementById('aiChatModal');
+        const aiChatDisplay = document.getElementById('aiChatDisplay');
+        const aiChatPromptInput = document.getElementById('aiChatPromptInput');
+        const sendAiPromptButton = document.getElementById('sendAiPromptButton');
+        const closeAiChatButton = document.getElementById('closeAiChatButton');
+        const aiChatLoader = document.getElementById('aiChatLoader');
+        const attachAiFileButton = document.getElementById('attachAiFileButton');
+        const aiChatFileInput = document.getElementById('aiChatFileInput');
+        const aiChatImagePreviewContainer = document.getElementById('aiChatImagePreviewContainer');
+        const aiChatImagePreview = document.getElementById('aiChatImagePreview');
+        const removeAiChatImageButton = document.getElementById('removeAiChatImageButton');
+
+        const customDataTableContainer = document.querySelector('#customDataSection .custom-table-container');
+        const customDataTableBody = document.getElementById('customDataTableBody');
+        const customTablePlaceholder = document.getElementById('customTablePlaceholder');
+        const addCustomTableRowButton = document.getElementById('addCustomTableRowButton');
+        const exportCustomTableButton = document.getElementById('exportCustomTableButton');
+        const clearCustomTableButton = document.getElementById('clearCustomTableButton');
+
+        // Variabili di stato
+        const ctx = drawingCanvas.getContext('2d');
+        let dimensionData = []; 
+        let selectedDimension = null;
+        let placedBollini = []; 
+        let currentImage = null; 
+        let activeMode = null; 
+        let tempBollinoCoords = { x: 0, y: 0 }; 
+        let sequentialAnnotationCounter = 1;
+        let sequentialAnnotationPrefix = "";
+        let calibrationPoints = []; 
+        let measurementPoints = []; 
+        let worldScaleFactor = null; 
+        let worldScaleUnit = "mm";
+        let temporaryLine = null; 
+        let lastMeasurementText = null;
+        let beingDraggedBollino = null; 
+        let dragStartCoords = { x: 0, y: 0 }; 
+        let currentSnappedPoint = null; 
+
+        const BOLLINO_DEFAULT_RADIUS_IMG_PX = 20;    
+        const MIN_BOLLINO_RADIUS_ON_SCREEN_PX = 12; 
+        const MIN_TEXT_SIZE_ON_SCREEN_PX = 9;       
+        const TEXT_SIZE_TO_ACTUAL_RADIUS_RATIO = 1.0; 
+
+        const POINT_INDICATOR_RADIUS_IMG_PX = 5;    
+        const SNAP_THRESHOLD_SCREEN_PX = 15;        
+        const CALIBRATION_COLOR = '#fde047'; 
+        const MEASUREMENT_COLOR = '#f97316'; 
+        const SNAP_INDICATOR_COLOR = '#38bdf8'; 
+        const CROSSHAIR_COLOR = 'rgba(220, 38, 38, 0.7)'; 
+
+        let zoomLevel = 1.0;
+        let minZoom = 0.1;
+        let maxZoom = 10.0;
+        let panOffsetX = 0; 
+        let panOffsetY = 0; 
+        let isPanning = false;
+        let lastPanPosition = { x: 0, y: 0 };
+        let currentMouseCanvasPos = { x: 0, y: 0 }; 
+
+        let bollinoScaleFactor = 1.0; 
+        const MIN_BOLLINO_SCALE = 0.5;
+        const MAX_BOLLINO_SCALE = 2.5;
+        const BOLLINO_SCALE_STEP = 0.1;
+
+        let aiChatHistory = [];
+        let currentAiChatImage = { base64: null, mimeType: null, fileName: null };
+        let customTableEntries = []; 
+
+        // --- Funzioni Utilità Generali ---
+        function showInfo(message) { infoBox.textContent = message; infoBox.style.display = 'block'; }
+        function updateUIDisplays() {
+            const scaleText = worldScaleFactor ? `Scala: 1 ${worldScaleUnit} ≈ ${worldScaleFactor.toFixed(2)}px (img)` : 'Scala non calibrata';
+            const zoomText = `Zoom: ${(zoomLevel * 100).toFixed(0)}%`;
+            const bollinoSizeText = `Dim. Bollini: ${(bollinoScaleFactor * 100).toFixed(0)}%`;
+            scaleDisplay.textContent = `${scaleText} | ${zoomText} | ${bollinoSizeText}`;
+            scaleDisplay.style.display = 'block';
+            zoomInButton.disabled = zoomLevel >= maxZoom;
+            zoomOutButton.disabled = zoomLevel <= minZoom;
+            bollinoSizeIncreaseButton.disabled = bollinoScaleFactor >= MAX_BOLLINO_SCALE;
+            bollinoSizeDecreaseButton.disabled = bollinoScaleFactor <= MIN_BOLLINO_SCALE;
+        }
+        function canvasToImageCoords(canvasX, canvasY) { return { x: (canvasX - panOffsetX) / zoomLevel, y: (canvasY - panOffsetY) / zoomLevel }; }
+        function imageToCanvasCoords(imageX, imageY) { return { x: (imageX * zoomLevel) + panOffsetX, y: (imageY * zoomLevel) + panOffsetY }; }
+        function getOrthogonalPointImg(startPointImg, currentPointImg) { 
+            const dx = Math.abs(currentPointImg.x - startPointImg.x); 
+            const dy = Math.abs(currentPointImg.y - startPointImg.y);
+            return dx > dy ? { x: currentPointImg.x, y: startPointImg.y } : { x: startPointImg.x, y: currentPointImg.y };
+        }
+        function updateCanvasCursor() {
+            drawingCanvas.classList.remove('crosshair-mode-active', 'cell-cursor', 'delete-mode', 'draggable-bollino-hover', 'dragging-bollino', 'over-bollino', 'panning-cursor', 'panning-active-cursor');
+            if (isPanning) { drawingCanvas.classList.add('panning-active-cursor'); return; }
+            if (beingDraggedBollino) { drawingCanvas.classList.add('dragging-bollino'); return; }
+            if (activeMode) {
+                switch (activeMode) {
+                    case 'delete': drawingCanvas.classList.add('delete-mode'); break;
+                    case 'freeAnnotation': case 'sequentialAnnotation': drawingCanvas.classList.add('cell-cursor'); break;
+                    case 'calibrateScale': case 'measureDistance': drawingCanvas.classList.add('crosshair-mode-active'); break;
+                    default: drawingCanvas.style.cursor = 'default';
+                }
+            } else { drawingCanvas.classList.add('panning-cursor'); }
+        }
+        function setActiveMode(modeName) {
+            beingDraggedBollino = null; currentSnappedPoint = null; calibrationPoints = []; measurementPoints = []; temporaryLine = null; lastMeasurementText = null; isPanning = false;
+            const oldActiveMode = activeMode; activeMode = null; 
+            document.querySelectorAll('.button-group button').forEach(btn => btn.classList.remove('active-mode-btn'));
+            toggleDeleteModeButton.innerHTML = '<i class="fas fa-eraser mr-1"></i>Cancella Boll.';
+            toggleFreeAnnotationModeButton.innerHTML = '<i class="fas fa-paint-brush mr-1"></i>Pall. Libera';
+            toggleSequentialAnnotationModeButton.innerHTML = '<i class="fas fa-list-ol mr-1"></i>Pall. Seq.';
+            toggleCalibrateScaleModeButton.innerHTML = '<i class="fas fa-ruler-combined mr-1"></i>Calibra Scala';
+            toggleMeasureDistanceModeButton.innerHTML = '<i class="fas fa-drafting-compass mr-1"></i>Misura Dist.';
+
+            if (modeName && modeName === oldActiveMode) { modeName = null; }
+            if (modeName) {
+                activeMode = modeName;
+                let buttonToActivate, newTextContent, infoMsg;
+                switch (modeName) {
+                    case 'delete': [buttonToActivate, newTextContent, infoMsg] = [toggleDeleteModeButton, '<i class="fas fa-eraser mr-1"></i>Cancella (ON)', 'MODALITÀ CANCELLA: Clicca su un bollino per rimuoverlo.']; break;
+                    case 'freeAnnotation': [buttonToActivate, newTextContent, infoMsg] = [toggleFreeAnnotationModeButton, '<i class="fas fa-paint-brush mr-1"></i>Libera (ON)', 'PALLINATURA LIBERA: Clicca sul disegno per posizionare.']; break;
+                    case 'sequentialAnnotation': [buttonToActivate, newTextContent, infoMsg] = [toggleSequentialAnnotationModeButton, '<i class="fas fa-list-ol mr-1"></i>Seq. (ON)', `PALLINATURA SEQUENZIALE: Inizio da ${sequentialAnnotationPrefix}${sequentialAnnotationCounter}. Clicca per posizionare.`]; break;
+                    case 'calibrateScale': [buttonToActivate, newTextContent, infoMsg] = [toggleCalibrateScaleModeButton, '<i class="fas fa-ruler-combined mr-1"></i>Calibra (ON)', 'CALIBRA SCALA: Clicca due punti di una quota nota.']; break;
+                    case 'measureDistance':
+                        if (!worldScaleFactor) { showInfo('ERRORE: La scala non è calibrata. Calibra prima di misurare.'); activeMode = null; updateCanvasCursor(); redrawCanvas(); return; }
+                        [buttonToActivate, newTextContent, infoMsg] = [toggleMeasureDistanceModeButton, '<i class="fas fa-drafting-compass mr-1"></i>Misura (ON)', 'MISURA DISTANZA: Clicca due punti.']; break;
+                }
+                if (buttonToActivate) { buttonToActivate.classList.add('active-mode-btn'); buttonToActivate.innerHTML = newTextContent; showInfo(infoMsg); }
+            } else { showInfo('Nessuna modalità attiva. Zooma/Trascina o seleziona un\'azione. Sposta bollini esistenti.'); }
+            updateCanvasCursor(); redrawCanvas();
+        }
+
+        function updateDimensionDataEntry(index, field, value) {
+            if (dimensionData[index]) {
+                dimensionData[index][field] = value.trim();
+                console.log(`Dato aggiornato: Riga ${index}, Campo ${field}, Valore: ${value.trim()}`);
+            }
+        }
+
+        function populateTable() { 
+            dimensionsTableBody.innerHTML = '';
+            if (dimensionData.length === 0) { tablePlaceholder.style.display = 'block'; tableContainer.style.display = 'none'; exportCsvQuotesButton.style.display = 'none'; return; }
+            tablePlaceholder.style.display = 'none'; tableContainer.style.display = 'block'; exportCsvQuotesButton.style.display = 'block';
+            
+            dimensionData.forEach((dim, index) => {
+                const row = dimensionsTableBody.insertRow(); 
+                row.classList.add('cursor-pointer', 'hover:bg-gray-600');
+                row.dataset.index = index; 
+
+                const cellLetter = row.insertCell(); 
+                cellLetter.textContent = dim.Lettera || 'N/D'; 
+                cellLetter.className = 'px-2 py-1.5 text-xs text-gray-300';
+                
+                const cellText = row.insertCell(); 
+                cellText.textContent = dim['Testo completo rilevato'] || 'N/D'; 
+                cellText.className = 'px-2 py-1.5 text-xs text-gray-300 truncate max-w-[100px] sm:max-w-xs'; // Max-width per testo quota
+                
+                const cellTolleranza = row.insertCell();
+                cellTolleranza.textContent = dim.tolleranza || '';
+                cellTolleranza.className = 'px-2 py-1.5 text-xs text-gray-300';
+                cellTolleranza.contentEditable = "true";
+                cellTolleranza.addEventListener('blur', (e) => updateDimensionDataEntry(index, 'tolleranza', e.target.textContent));
+
+                const cellMisurato = row.insertCell();
+                cellMisurato.textContent = dim.misurato || '';
+                cellMisurato.className = 'px-2 py-1.5 text-xs text-gray-300';
+                cellMisurato.contentEditable = "true";
+                cellMisurato.addEventListener('blur', (e) => updateDimensionDataEntry(index, 'misurato', e.target.textContent));
+
+                row.addEventListener('click', (event) => {
+                    if (event.target.isContentEditable) return;
+                    if (activeMode && activeMode !== null && activeMode !== 'freeAnnotation' && activeMode !== 'sequentialAnnotation') { 
+                        showInfo(`Modalità '${activeMode}' attiva. Disattivala per selezionare dalla tabella.`); return; 
+                    }
+                    if (beingDraggedBollino || isPanning) return; 
+                    setActiveMode(null); 
+                    selectedDimension = dimensionData[index]; 
+                    document.querySelectorAll('#dimensionsTableBody tr').forEach(r => r.classList.remove('selected-row'));
+                    row.classList.add('selected-row'); 
+                    showInfo(`Quota selezionata: ${selectedDimension.Lettera}. Clicca sul disegno per posizionare il bollino.`);
+                });
+            });
+        }
+        
+        function setupCanvasLayout() { 
+            if (!drawingArea || !drawingCanvas) return;
+            const areaWidth = drawingArea.clientWidth; const areaHeight = drawingArea.clientHeight;
+            drawingCanvas.width = areaWidth; drawingCanvas.height = areaHeight;
+            if (!currentImage || !currentImage.complete || currentImage.naturalWidth === 0) { 
+                 ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+                 ctx.fillStyle = '#374151'; ctx.fillRect(0,0,drawingCanvas.width, drawingCanvas.height);
+                 ctx.fillStyle = '#9ca3af'; ctx.textAlign = 'center';
+                 ctx.font = `${Math.min(18, drawingCanvas.width/25)}px Inter, sans-serif`;
+                 ctx.fillText('Carica un disegno tecnico per iniziare', drawingCanvas.width / 2, drawingCanvas.height / 2);
+            }
+            redrawCanvas();
+        }
+        function resetZoomAndPan() {
+            if (!currentImage || !drawingCanvas || drawingCanvas.width === 0 || drawingCanvas.height === 0) {
+                zoomLevel = 1.0; panOffsetX = 0; panOffsetY = 0; updateUIDisplays(); return;
+            }
+            const canvasAspect = drawingCanvas.width / drawingCanvas.height;
+            const imageAspect = currentImage.naturalWidth / currentImage.naturalHeight;
+            zoomLevel = (imageAspect > canvasAspect) ? (drawingCanvas.width / currentImage.naturalWidth) : (drawingCanvas.height / currentImage.naturalHeight);
+            zoomLevel = Math.min(zoomLevel, maxZoom); zoomLevel = Math.max(zoomLevel, minZoom); 
+            panOffsetX = (drawingCanvas.width - currentImage.naturalWidth * zoomLevel) / 2;
+            panOffsetY = (drawingCanvas.height - currentImage.naturalHeight * zoomLevel) / 2;
+            updateUIDisplays(); redrawCanvas();
+        }
+        function redrawCanvas() {
+            if (!ctx || !drawingCanvas) return;
+            ctx.fillStyle = '#2d3748'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+            if (currentImage && currentImage.complete && currentImage.naturalWidth > 0) {
+                ctx.save();
+                ctx.translate(panOffsetX, panOffsetY); ctx.scale(zoomLevel, zoomLevel);
+                ctx.drawImage(currentImage, 0, 0, currentImage.naturalWidth, currentImage.naturalHeight);
+                placedBollini.forEach(bollino => {
+                    const scaledDefaultBollinoRadiusImgPx = BOLLINO_DEFAULT_RADIUS_IMG_PX * bollinoScaleFactor;
+                    const defaultBollinoRadiusOnScreen = scaledDefaultBollinoRadiusImgPx * zoomLevel;
+                    const actualBollinoRadiusOnScreen = Math.max(defaultBollinoRadiusOnScreen, MIN_BOLLINO_RADIUS_ON_SCREEN_PX);
+                    const drawCircleRadiusImgPx = actualBollinoRadiusOnScreen / zoomLevel;
+                    let textFontSizeOnScreen = actualBollinoRadiusOnScreen * TEXT_SIZE_TO_ACTUAL_RADIUS_RATIO;
+                    textFontSizeOnScreen = Math.max(textFontSizeOnScreen, MIN_TEXT_SIZE_ON_SCREEN_PX);
+                    const drawTextFontSizeImgPx = textFontSizeOnScreen / zoomLevel;
+                    drawBollinoOnContext(ctx, bollino.letter, bollino.x, bollino.y, false, drawCircleRadiusImgPx, drawTextFontSizeImgPx);
+                });
+                if (currentSnappedPoint) { 
+                    ctx.beginPath(); ctx.arc(currentSnappedPoint.x, currentSnappedPoint.y, (SNAP_THRESHOLD_SCREEN_PX / 1.5) / zoomLevel, 0, 2 * Math.PI);
+                    ctx.strokeStyle = SNAP_INDICATOR_COLOR; ctx.lineWidth = 2 / zoomLevel; 
+                    ctx.setLineDash([3 / zoomLevel, 3 / zoomLevel]); ctx.stroke(); ctx.setLineDash([]);
+                }
+                const pointIndicatorRadiusOnScreen = POINT_INDICATOR_RADIUS_IMG_PX * zoomLevel;
+                const actualPointIndicatorRadiusImgPx = pointIndicatorRadiusOnScreen < 2 ? (2 / zoomLevel) : POINT_INDICATOR_RADIUS_IMG_PX;
+                if (activeMode === 'calibrateScale' && calibrationPoints.length === 1) {
+                    ctx.beginPath(); ctx.arc(calibrationPoints[0].x, calibrationPoints[0].y, actualPointIndicatorRadiusImgPx, 0, 2 * Math.PI);
+                    ctx.fillStyle = CALIBRATION_COLOR; ctx.fill();
+                } else if (activeMode === 'measureDistance' && measurementPoints.length === 1) {
+                    ctx.beginPath(); ctx.arc(measurementPoints[0].x, measurementPoints[0].y, actualPointIndicatorRadiusImgPx, 0, 2 * Math.PI);
+                    ctx.fillStyle = MEASUREMENT_COLOR; ctx.fill();
+                }
+                if (temporaryLine && temporaryLine.start && temporaryLine.end) { 
+                    ctx.beginPath(); ctx.moveTo(temporaryLine.start.x, temporaryLine.start.y); ctx.lineTo(temporaryLine.end.x, temporaryLine.end.y);
+                    ctx.strokeStyle = activeMode === 'calibrateScale' ? CALIBRATION_COLOR : MEASUREMENT_COLOR;
+                    ctx.lineWidth = 2 / zoomLevel; ctx.setLineDash([5 / zoomLevel, 5 / zoomLevel]); ctx.stroke(); ctx.setLineDash([]);
+                }
+                if (lastMeasurementText && measurementPoints.length === 2) { 
+                    ctx.beginPath(); ctx.moveTo(measurementPoints[0].x, measurementPoints[0].y); ctx.lineTo(measurementPoints[1].x, measurementPoints[1].y);
+                    ctx.strokeStyle = MEASUREMENT_COLOR; ctx.lineWidth = 1.5 / zoomLevel; ctx.stroke();
+                    ctx.font = `bold ${12 / zoomLevel}px Arial`; ctx.fillStyle = MEASUREMENT_COLOR; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+                    const midX = (measurementPoints[0].x + measurementPoints[1].x) / 2; const midY = (measurementPoints[0].y + measurementPoints[1].y) / 2;
+                    ctx.fillText(lastMeasurementText, midX, midY - (5 / zoomLevel));
+                }
+                if ((activeMode === 'calibrateScale' || activeMode === 'measureDistance') && drawingCanvas.classList.contains('crosshair-mode-active')) {
+                    const mouseImgCoords = canvasToImageCoords(currentMouseCanvasPos.x, currentMouseCanvasPos.y);
+                    ctx.strokeStyle = CROSSHAIR_COLOR; ctx.lineWidth = 1 / zoomLevel; 
+                    ctx.beginPath(); ctx.moveTo(mouseImgCoords.x, 0); ctx.lineTo(mouseImgCoords.x, currentImage.naturalHeight);
+                    ctx.moveTo(0, mouseImgCoords.y); ctx.lineTo(currentImage.naturalWidth, mouseImgCoords.y); ctx.stroke();
+                }
+                ctx.restore(); 
+            } else {
+                 ctx.fillStyle = '#374151'; ctx.fillRect(0,0,drawingCanvas.width, drawingCanvas.height);
+                 ctx.fillStyle = '#9ca3af'; ctx.textAlign = 'center';
+                 ctx.font = `${Math.min(18, drawingCanvas.width/25)}px Inter, sans-serif`;
+                 ctx.fillText('Carica un disegno tecnico per iniziare', drawingCanvas.width / 2, drawingCanvas.height / 2);
+            }
+        }
+        function drawBollinoOnContext(targetCtx, letter, x_img, y_img, isExport = false, radius_img_px, fontSize_img_px) {
+            const fillStyle = isExport ? 'rgb(220, 38, 38)' : 'rgba(220, 38, 38, 0.85)';
+            targetCtx.beginPath(); targetCtx.arc(x_img, y_img, radius_img_px, 0, 2 * Math.PI, false);
+            targetCtx.fillStyle = fillStyle; targetCtx.fill();
+            targetCtx.lineWidth = (isExport ? 1.5 : 1.5 / zoomLevel); targetCtx.strokeStyle = '#7f1d1d'; targetCtx.stroke();
+            targetCtx.font = `bold ${fontSize_img_px}px Arial, sans-serif`; targetCtx.fillStyle = 'white';
+            targetCtx.textAlign = 'center'; targetCtx.textBaseline = 'middle';
+            targetCtx.fillText(letter, x_img, y_img + (fontSize_img_px * 0.05));
+        }
+        function getBollinoAtCanvasPosition(canvasX, canvasY) {
+            const imgCoords = canvasToImageCoords(canvasX, canvasY);
+            const scaledDefaultBollinoRadiusImgPx = BOLLINO_DEFAULT_RADIUS_IMG_PX * bollinoScaleFactor;
+            const defaultBollinoRadiusOnScreen = scaledDefaultBollinoRadiusImgPx * zoomLevel;
+            const actualBollinoRadiusOnScreen = Math.max(defaultBollinoRadiusOnScreen, MIN_BOLLINO_RADIUS_ON_SCREEN_PX);
+            const hitTestRadiusImgPx = actualBollinoRadiusOnScreen / zoomLevel;
+            for (let i = placedBollini.length - 1; i >= 0; i--) {
+                const bollino = placedBollini[i]; 
+                const distance = Math.sqrt(Math.pow(imgCoords.x - bollino.x, 2) + Math.pow(imgCoords.y - bollino.y, 2));
+                if (distance <= hitTestRadiusImgPx) { return { index: i, bollino: bollino }; }
+            }
+            return null;
+        }
+
+        imageUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0]; imageUploadError.textContent = ''; imageError.textContent = '';
+            if (file) {
+                if (!file.type.startsWith('image/')) { imageUploadError.textContent = 'File non valido. Seleziona un\'immagine.'; return; }
+                loader.style.display = 'block'; const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        currentImage = img; placedBollini = []; worldScaleFactor = null;
+                        setActiveMode(null); setupCanvasLayout(); resetZoomAndPan();   
+                        loader.style.display = 'none'; showInfo('Immagine caricata.');
+                        tablePlaceholder.textContent = 'Carica un file CSV per le quote o usa una modalità di pallinatura.';
+                        updateUIDisplays();
+                    };
+                    img.onerror = () => {
+                        imageError.textContent = 'Errore nel caricamento dell\'immagine.'; currentImage = null; worldScaleFactor = null; setActiveMode(null);
+                        loader.style.display = 'none'; setupCanvasLayout(); resetZoomAndPan(); updateUIDisplays();
+                    };
+                    img.src = e.target.result; drawingImage.src = e.target.result; 
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+        csvUpload.addEventListener('change', (event) => { 
+            const file = event.target.files[0]; csvUploadError.textContent = '';
+            if (file) {
+                if (!file.name.endsWith('.csv')) { csvUploadError.textContent = 'File non valido. Seleziona un file .csv'; return; }
+                loader.style.display = 'block'; const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const csvText = e.target.result; const lines = csvText.split(/\r\n|\n/);
+                        if (lines.length < 2) throw new Error("CSV non valido o vuoto.");
+                        const headers = lines[0].split(',').map(h => h.trim());
+                        const letterIndex = headers.indexOf('Lettera'); const textIndex = headers.indexOf('Testo completo rilevato');
+                        if (letterIndex === -1 || textIndex === -1) throw new Error("Header CSV mancanti: 'Lettera' e 'Testo completo rilevato' richiesti.");
+                        dimensionData = [];
+                        for (let i = 1; i < lines.length; i++) {
+                            if (lines[i].trim() === '') continue; const data = lines[i].split(',');
+                            dimensionData.push({ 
+                                Lettera: data[letterIndex] ? data[letterIndex].trim() : 'N/D', 
+                                'Testo completo rilevato': data[textIndex] ? data[textIndex].trim() : 'N/D',
+                                tolleranza: '', 
+                                misurato: ''    
+                            });
+                        }
+                        populateTable(); showInfo('File CSV per quote bollini caricato. Tolleranza e Misurato sono editabili.');
+                    } catch (error) { csvUploadError.textContent = `Errore CSV: ${error.message}`; dimensionData = []; populateTable(); showInfo('Errore caricamento CSV quote bollini.'); }
+                    finally { loader.style.display = 'none'; }
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        drawingCanvas.addEventListener('mousedown', (event) => {
+            if (!currentImage || event.button !== 0) return; 
+            const rect = drawingCanvas.getBoundingClientRect();
+            const canvasX = event.clientX - rect.left; const canvasY = event.clientY - rect.top;
+            if (activeMode === null) { 
+                const bollinoData = getBollinoAtCanvasPosition(canvasX, canvasY);
+                if (bollinoData) {
+                    beingDraggedBollino = bollinoData.bollino;
+                    const mouseImgCoords = canvasToImageCoords(canvasX, canvasY);
+                    dragStartCoords = { x: mouseImgCoords.x - beingDraggedBollino.x, y: mouseImgCoords.y - beingDraggedBollino.y }; 
+                    isPanning = false; 
+                } else { isPanning = true; lastPanPosition = { x: canvasX, y: canvasY }; }
+            }
+            updateCanvasCursor();
+        });
+        drawingCanvas.addEventListener('mousemove', (event) => {
+            if (!currentImage) return;
+            const rect = drawingCanvas.getBoundingClientRect();
+            currentMouseCanvasPos = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+            if (isPanning) {
+                const dx = currentMouseCanvasPos.x - lastPanPosition.x; const dy = currentMouseCanvasPos.y - lastPanPosition.y;
+                panOffsetX += dx; panOffsetY += dy;
+                lastPanPosition = { x: currentMouseCanvasPos.x, y: currentMouseCanvasPos.y };
+            } else if (beingDraggedBollino) {
+                const mouseImgCoords = canvasToImageCoords(currentMouseCanvasPos.x, currentMouseCanvasPos.y);
+                beingDraggedBollino.x = mouseImgCoords.x - dragStartCoords.x;
+                beingDraggedBollino.y = mouseImgCoords.y - dragStartCoords.y;
+            } else { 
+                currentSnappedPoint = null;
+                let effectiveImgCoords = canvasToImageCoords(currentMouseCanvasPos.x, currentMouseCanvasPos.y);
+                if ((activeMode === 'calibrateScale' && calibrationPoints.length < 2) || (activeMode === 'measureDistance' && measurementPoints.length < 2 && worldScaleFactor)) {
+                    for (const bollino of placedBollini) { 
+                        const distImg = Math.sqrt(Math.pow(effectiveImgCoords.x - bollino.x, 2) + Math.pow(effectiveImgCoords.y - bollino.y, 2));
+                        if (distImg < (SNAP_THRESHOLD_SCREEN_PX / zoomLevel)) { 
+                            currentSnappedPoint = { x: bollino.x, y: bollino.y, type: 'bollino', originalBollino: bollino };
+                            effectiveImgCoords = currentSnappedPoint; break;
+                        }
+                    }
+                }
+                if ((activeMode === 'calibrateScale' && calibrationPoints.length === 1) || (activeMode === 'measureDistance' && measurementPoints.length === 1 && worldScaleFactor)) {
+                    temporaryLine.end = getOrthogonalPointImg(temporaryLine.start, effectiveImgCoords);
+                }
+                if (!activeMode) { drawingCanvas.classList.toggle('draggable-bollino-hover', getBollinoAtCanvasPosition(currentMouseCanvasPos.x, currentMouseCanvasPos.y) !== null);
+                } else if (activeMode === 'delete') { drawingCanvas.classList.toggle('over-bollino', getBollinoAtCanvasPosition(currentMouseCanvasPos.x, currentMouseCanvasPos.y) !== null); }
+            }
+            redrawCanvas();
+        });
+        drawingCanvas.addEventListener('mouseup', (event) => {
+            if (event.button !== 0) return;
+            if (isPanning) { isPanning = false; } 
+            else if (beingDraggedBollino) { showInfo(`Bollino '${beingDraggedBollino.letter}' spostato.`); beingDraggedBollino = null; }
+            updateCanvasCursor(); redrawCanvas(); 
+        });
+        drawingCanvas.addEventListener('mouseleave', () => {
+            if (isPanning) isPanning = false;
+            if (beingDraggedBollino) { showInfo(`Bollino '${beingDraggedBollino.letter}' spostato (rilasciato fuori canvas).`); beingDraggedBollino = null; }
+            if (activeMode === 'calibrateScale' || activeMode === 'measureDistance') {
+                drawingCanvas.classList.remove('crosshair-mode-active'); redrawCanvas(); drawingCanvas.classList.add('crosshair-mode-active'); 
+            }
+            updateCanvasCursor();
+        });
+        drawingCanvas.addEventListener('mouseenter', () => { updateCanvasCursor(); if (activeMode === 'calibrateScale' || activeMode === 'measureDistance') { redrawCanvas(); } });
+        drawingCanvas.addEventListener('click', (event) => {
+            if (!currentImage || isPanning || beingDraggedBollino) return; 
+            const rect = drawingCanvas.getBoundingClientRect();
+            const canvasX = event.clientX - rect.left; const canvasY = event.clientY - rect.top;
+            let finalImgCoords = canvasToImageCoords(canvasX, canvasY); 
+            if (currentSnappedPoint && ((activeMode === 'calibrateScale' && calibrationPoints.length < 2) || (activeMode === 'measureDistance' && measurementPoints.length < 2 && worldScaleFactor))) {
+                finalImgCoords = { x: currentSnappedPoint.x, y: currentSnappedPoint.y };
+                showInfo(`Punto agganciato al bollino '${currentSnappedPoint.originalBollino.letter}'.`);
+            }
+            switch (activeMode) {
+                case 'delete':
+                    const bollinoToRemoveData = getBollinoAtCanvasPosition(canvasX, canvasY); 
+                    if (bollinoToRemoveData) { const removed = placedBollini.splice(bollinoToRemoveData.index, 1)[0]; showInfo(`Bollino '${removed.letter}' rimosso.`); } 
+                    else { showInfo("Nessun bollino trovato per la cancellazione."); }
+                    break;
+                case 'freeAnnotation':
+                    tempBollinoCoords = finalImgCoords; bollinoLabelInput.value = '';
+                    labelInputModal.classList.add('active'); bollinoLabelInput.focus();
+                    break;
+                case 'sequentialAnnotation':
+                    const seqLabel = `${sequentialAnnotationPrefix}${sequentialAnnotationCounter}`;
+                    placedBollini.push({ letter: seqLabel, x: finalImgCoords.x, y: finalImgCoords.y, text: `Annotazione sequenziale: ${seqLabel}` });
+                    sequentialAnnotationCounter++; showInfo(`Bollino sequenziale '${seqLabel}' posizionato. Prossimo: ${sequentialAnnotationPrefix}${sequentialAnnotationCounter}`);
+                    if (toggleSequentialAnnotationModeButton.classList.contains('active-mode-btn')) { 
+                        toggleSequentialAnnotationModeButton.innerHTML = '<i class="fas fa-list-ol mr-1"></i>Seq. (ON)';
+                        showInfo(`Pallinatura Sequenziale ATTIVA. Prossimo: ${sequentialAnnotationPrefix}${sequentialAnnotationCounter}. Clicca sul disegno.`);
+                    }
+                    break;
+                case 'calibrateScale':
+                    calibrationPoints.push(finalImgCoords); 
+                    if (calibrationPoints.length === 1) { temporaryLine = { start: finalImgCoords, end: finalImgCoords }; showInfo('Primo punto calibrazione. Seleziona il secondo.'); } 
+                    else if (calibrationPoints.length === 2) {
+                        calibrationPoints[1] = getOrthogonalPointImg(calibrationPoints[0], calibrationPoints[1]);
+                        if (temporaryLine) temporaryLine.end = calibrationPoints[1]; 
+                        realDimensionInput.value = ''; unitInput.value = worldScaleUnit;
+                        calibrateScaleModal.classList.add('active'); realDimensionInput.focus();
+                        showInfo('Secondo punto selezionato. Inserisci valore reale.');
+                    }
+                    break;
+                case 'measureDistance':
+                    if (!worldScaleFactor) { showInfo('ERRORE: Scala non calibrata.'); return; }
+                    measurementPoints.push(finalImgCoords); 
+                    if (measurementPoints.length === 1) { temporaryLine = { start: finalImgCoords, end: finalImgCoords }; lastMeasurementText = null; showInfo('Primo punto misura. Seleziona il secondo.'); } 
+                    else if (measurementPoints.length === 2) {
+                        measurementPoints[1] = getOrthogonalPointImg(measurementPoints[0], measurementPoints[1]);
+                        if (temporaryLine) temporaryLine.end = measurementPoints[1]; 
+                        const dx_img_pixels = Math.abs(measurementPoints[1].x - measurementPoints[0].x); const dy_img_pixels = Math.abs(measurementPoints[1].y - measurementPoints[0].y);
+                        const pixelDistanceImg = Math.sqrt(dx_img_pixels * dx_img_pixels + dy_img_pixels * dy_img_pixels);
+                        const realDistance = pixelDistanceImg / worldScaleFactor;
+                        lastMeasurementText = `${realDistance.toFixed(2)} ${worldScaleUnit}`;
+                        showInfo(`Misura: ${lastMeasurementText}. Clicca di nuovo per iniziare una nuova misura.`);
+                    }
+                    break;
+                default: 
+                    if (selectedDimension) { 
+                        placedBollini.push({ 
+                            letter: selectedDimension.Lettera, 
+                            x: finalImgCoords.x, y: finalImgCoords.y, 
+                            text: selectedDimension['Testo completo rilevato'],
+                            tolleranza: selectedDimension.tolleranza || '', 
+                            misurato: selectedDimension.misurato || ''    
+                        });
+                        showInfo(`Bollino '${selectedDimension.Lettera}' posizionato.`);
+                        selectedDimension = null;
+                        document.querySelectorAll('#dimensionsTableBody tr').forEach(r => r.classList.remove('selected-row'));
+                    }
+                    break;
+            }
+            currentSnappedPoint = null; redrawCanvas();
+        });
+        drawingCanvas.addEventListener('wheel', (event) => {
+            if (!currentImage) return; event.preventDefault();
+            const rect = drawingCanvas.getBoundingClientRect();
+            const mouseCanvasX = event.clientX - rect.left; const mouseCanvasY = event.clientY - rect.top;
+            const mouseImgX_before = (mouseCanvasX - panOffsetX) / zoomLevel; const mouseImgY_before = (mouseCanvasY - panOffsetY) / zoomLevel;
+            const zoomFactor = 1.1;
+            if (event.deltaY < 0) { zoomLevel *= zoomFactor; } else { zoomLevel /= zoomFactor; }
+            zoomLevel = Math.max(minZoom, Math.min(maxZoom, zoomLevel));
+            panOffsetX = mouseCanvasX - mouseImgX_before * zoomLevel; panOffsetY = mouseCanvasY - mouseImgY_before * zoomLevel;
+            updateUIDisplays(); redrawCanvas();
+        });
+
+        bollinoSizeIncreaseButton.addEventListener('click', () => { bollinoScaleFactor = Math.min(MAX_BOLLINO_SCALE, bollinoScaleFactor + BOLLINO_SCALE_STEP); updateUIDisplays(); redrawCanvas(); });
+        bollinoSizeDecreaseButton.addEventListener('click', () => { bollinoScaleFactor = Math.max(MIN_BOLLINO_SCALE, bollinoScaleFactor - BOLLINO_SCALE_STEP); updateUIDisplays(); redrawCanvas(); });
+        bollinoSizeResetButton.addEventListener('click', () => { bollinoScaleFactor = 1.0; updateUIDisplays(); redrawCanvas(); });
+
+        confirmLabelButton.addEventListener('click', () => {
+            const label = bollinoLabelInput.value;
+            if (label && label.trim() !== "") {
+                placedBollini.push({ letter: label.trim(), x: tempBollinoCoords.x, y: tempBollinoCoords.y, text: `Annotazione libera: ${label.trim()}` });
+                redrawCanvas(); showInfo(`Bollino libero '${label.trim()}' posizionato.`);
+            } else { showInfo("Etichetta non valida. Bollino non aggiunto."); }
+            labelInputModal.classList.remove('active');
+        });
+        cancelLabelButton.addEventListener('click', () => { labelInputModal.classList.remove('active'); showInfo("Aggiunta bollino libero annullata."); });
+        labelInputModal.addEventListener('click', (e) => { if (e.target === labelInputModal) cancelLabelButton.click(); });
+
+        confirmSequentialLabelButton.addEventListener('click', () => {
+            const prefix = sequentialPrefixInput.value.trim(); const startNum = parseInt(sequentialStartNumberInput.value, 10);
+            if (isNaN(startNum) || startNum < 0) { showInfo("Numero di partenza non valido."); sequentialStartNumberInput.focus(); return; }
+            sequentialAnnotationPrefix = prefix; sequentialAnnotationCounter = startNum; sequentialLabelInputModal.classList.remove('active');
+            setActiveMode('sequentialAnnotation'); 
+        });
+        cancelSequentialLabelButton.addEventListener('click', () => { sequentialLabelInputModal.classList.remove('active'); setActiveMode(null); showInfo("Impostazione pallinatura sequenziale annullata."); });
+        sequentialLabelInputModal.addEventListener('click', (e) => { if (e.target === sequentialLabelInputModal) cancelSequentialLabelButton.click(); });
+
+        confirmCalibrationButton.addEventListener('click', () => {
+            const realDim = parseFloat(realDimensionInput.value); const unit = unitInput.value.trim();
+            if (isNaN(realDim) || realDim <= 0) { showInfo("Valore reale non valido."); realDimensionInput.focus(); return; }
+            if (!unit) { showInfo("Unità di misura non valida."); unitInput.focus(); return; }
+            if (calibrationPoints.length === 2) { 
+                const dx_img_pixels = Math.abs(calibrationPoints[1].x - calibrationPoints[0].x); const dy_img_pixels = Math.abs(calibrationPoints[1].y - calibrationPoints[0].y);
+                const pixelDistanceImg = Math.sqrt(dx_img_pixels*dx_img_pixels + dy_img_pixels*dy_img_pixels);
+                if (pixelDistanceImg > 0) {
+                    worldScaleFactor = pixelDistanceImg / realDim; worldScaleUnit = unit;
+                    updateUIDisplays(); showInfo(`Scala calibrata: 1 ${worldScaleUnit} ≈ ${worldScaleFactor.toFixed(2)} pixel immagine.`);
+                } else { showInfo("Distanza calibrazione nulla. Riprova."); worldScaleFactor = null; updateUIDisplays(); }
+            }
+            calibrateScaleModal.classList.remove('active'); calibrationPoints = []; temporaryLine = null;
+            setActiveMode(null); redrawCanvas();
+        });
+        cancelCalibrationButton.addEventListener('click', () => {
+            calibrateScaleModal.classList.remove('active'); calibrationPoints = []; temporaryLine = null;
+            showInfo("Calibrazione annullata."); setActiveMode(null); redrawCanvas();
+        });
+        calibrateScaleModal.addEventListener('click', (e) => { if (e.target === calibrateScaleModal) cancelCalibrationButton.click(); });
+
+        toggleFreeAnnotationModeButton.addEventListener('click', () => setActiveMode('freeAnnotation'));
+        toggleSequentialAnnotationModeButton.addEventListener('click', () => {
+            if (activeMode === 'sequentialAnnotation') setActiveMode(null);
+            else { 
+                sequentialPrefixInput.value = sequentialAnnotationPrefix; sequentialStartNumberInput.value = sequentialAnnotationCounter;
+                sequentialLabelInputModal.classList.add('active'); sequentialPrefixInput.focus();
+            }
+        });
+        toggleDeleteModeButton.addEventListener('click', () => setActiveMode('delete'));
+        toggleCalibrateScaleModeButton.addEventListener('click', () => setActiveMode('calibrateScale'));
+        toggleMeasureDistanceModeButton.addEventListener('click', () => { if (activeMode === 'measureDistance') setActiveMode(null); else setActiveMode('measureDistance'); });
+
+        zoomInButton.addEventListener('click', () => {
+            if (!currentImage) return;
+            const centerCanvasX = drawingCanvas.width / 2; const centerCanvasY = drawingCanvas.height / 2;
+            const centerImgX_before = (centerCanvasX - panOffsetX) / zoomLevel; const centerImgY_before = (centerCanvasY - panOffsetY) / zoomLevel;
+            zoomLevel = Math.min(maxZoom, zoomLevel * 1.25);
+            panOffsetX = centerCanvasX - centerImgX_before * zoomLevel; panOffsetY = centerCanvasY - centerImgY_before * zoomLevel;
+            updateUIDisplays(); redrawCanvas();
+        });
+        zoomOutButton.addEventListener('click', () => {
+            if (!currentImage) return;
+            const centerCanvasX = drawingCanvas.width / 2; const centerCanvasY = drawingCanvas.height / 2;
+            const centerImgX_before = (centerCanvasX - panOffsetX) / zoomLevel; const centerImgY_before = (centerCanvasY - panOffsetY) / zoomLevel;
+            zoomLevel = Math.max(minZoom, zoomLevel / 1.25);
+            panOffsetX = centerCanvasX - centerImgX_before * zoomLevel; panOffsetY = centerCanvasY - centerImgY_before * zoomLevel;
+            updateUIDisplays(); redrawCanvas();
+        });
+        resetZoomButton.addEventListener('click', () => { if (!currentImage) return; resetZoomAndPan(); });
+
+        clearBolliniButton.addEventListener('click', () => { 
+            if (placedBollini.length === 0 && !currentImage ) { showInfo('Nessun bollino da cancellare o immagine non caricata.'); return; }
+            confirmClearModalText.textContent = "Sei sicuro di voler cancellare tutti i bollini posizionati sul disegno?"; confirmClearModal.classList.add('active');
+        });
+        confirmClearYes.addEventListener('click', () => {
+            if (confirmClearModalText.textContent.includes("bollini posizionati")) { 
+                placedBollini = []; redrawCanvas(); showInfo('Tutti i bollini del disegno sono stati cancellati.');
+            } else if (confirmClearModalText.textContent.includes("righe della tabella")) { 
+                customTableEntries = []; renderCustomTable(); showInfo('Tutte le righe della tabella personalizzata sono state cancellate.');
+            }
+            confirmClearModal.classList.remove('active'); 
+        });
+        confirmClearNo.addEventListener('click', () => confirmClearModal.classList.remove('active'));
+        confirmClearModal.addEventListener('click', (e) => { if (e.target === confirmClearModal) confirmClearNo.click(); });
+
+        exportButton.addEventListener('click', () => {
+            if (!currentImage || !currentImage.complete || currentImage.naturalWidth === 0) { showInfo('Carica un\'immagine valida prima di esportare.'); return; }
+            if (placedBollini.length === 0) { showInfo('Nessun bollino da esportare. Posizionane almeno uno.'); return; }
+            showInfo('Preparazione immagine per l\'export...'); loader.style.display = 'block';
+            setTimeout(() => {
+                try {
+                    const exportCanvas = document.createElement('canvas');
+                    exportCanvas.width = currentImage.naturalWidth; exportCanvas.height = currentImage.naturalHeight;
+                    const exportCtx = exportCanvas.getContext('2d');
+                    exportCtx.drawImage(currentImage, 0, 0, currentImage.naturalWidth, currentImage.naturalHeight);
+                    const exportBollinoRadius = BOLLINO_DEFAULT_RADIUS_IMG_PX * bollinoScaleFactor; 
+                    const exportFontSize = exportBollinoRadius * TEXT_SIZE_TO_ACTUAL_RADIUS_RATIO; 
+                    placedBollini.forEach(bollino => { drawBollinoOnContext(exportCtx, bollino.letter, bollino.x, bollino.y, true, exportBollinoRadius, exportFontSize); });
+                    const dataURL = exportCanvas.toDataURL('image/png');
+                    const link = document.createElement('a'); link.href = dataURL; link.download = 'disegno_con_bollini.png';
+                    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    showInfo('Immagine esportata con successo!');
+                } catch (err) { console.error("Errore export:", err); showInfo('Errore esportazione immagine.'); }
+                finally { loader.style.display = 'none'; }
+            }, 50);
+        });
+
+        function escapeCSV(text) {
+            if (text === undefined || text === null) return ""; let str = String(text);
+            if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) { str = '"' + str.replace(/"/g, '""') + '"'; } return str;
+        };
+
+        function exportBolliniDataToCSV() { 
+            if (!currentImage || !currentImage.complete || currentImage.naturalWidth === 0) { showInfo('Carica un\'immagine valida prima di esportare i dati dei bollini.'); return; }
+            if (placedBollini.length === 0) { showInfo('Nessun bollino da esportare.'); return; }
+            showInfo('Preparazione dati CSV bollini...'); loader.style.display = 'block';
+            setTimeout(() => {
+                try {
+                    const headers = ["Etichetta Bollino", "X Immagine Originale (px)", "Y Immagine Originale (px)", "Descrizione Associata", "Tolleranza (da CSV)", "Misurato (da CSV)"];
+                    const csvRows = [headers.join(',')];
+                    placedBollini.forEach(bollino => { 
+                        const originalX = bollino.x.toFixed(2); const originalY = bollino.y.toFixed(2);
+                        const row = [
+                            escapeCSV(bollino.letter), 
+                            originalX, 
+                            originalY, 
+                            escapeCSV(bollino.text),
+                            escapeCSV(bollino.tolleranza), 
+                            escapeCSV(bollino.misurato)    
+                        ]; 
+                        csvRows.push(row.join(','));
+                    });
+                    const csvString = csvRows.join('\n'); const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a'); const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url); link.setAttribute('download', 'dati_bollini_disegno.csv');
+                    link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    showInfo('Dati bollini esportati con successo in CSV!');
+                } catch (err) { console.error("Errore export CSV bollini:", err); showInfo('Errore esportazione dati bollini.'); }
+                finally { loader.style.display = 'none'; }
+            }, 50);
+        }
+        exportDataButton.addEventListener('click', exportBolliniDataToCSV);
+
+        // NUOVA FUNZIONE: Esporta tabella delle quote CSV (quella con Lettera, Testo, Tolleranza, Misurato)
+        function exportDimensionsTableToCSV() {
+            if (dimensionData.length === 0) {
+                showInfo('Nessun dato nelle quote da CSV da esportare.');
+                return;
+            }
+            showInfo('Preparazione dati CSV delle quote...');
+            loader.style.display = 'block';
+            setTimeout(() => {
+                try {
+                    const headers = ["Lettera", "Testo completo rilevato", "Tolleranza", "Misurato"];
+                    const csvRows = [headers.join(',')];
+                    dimensionData.forEach(dim => {
+                        const row = [
+                            escapeCSV(dim.Lettera),
+                            escapeCSV(dim['Testo completo rilevato']),
+                            escapeCSV(dim.tolleranza),
+                            escapeCSV(dim.misurato)
+                        ];
+                        csvRows.push(row.join(','));
+                    });
+                    const csvString = csvRows.join('\n');
+                    const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a');
+                    const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url);
+                    link.setAttribute('download', 'dati_quote_csv_editate.csv');
+                    link.style.visibility = 'hidden';
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    showInfo('Dati quote CSV esportati con successo!');
+                } catch (err) {
+                    console.error("Errore export CSV quote:", err);
+                    showInfo('Errore esportazione dati quote CSV.');
+                } finally {
+                    loader.style.display = 'none';
+                }
+            }, 50);
+        }
+        exportCsvQuotesButton.addEventListener('click', exportDimensionsTableToCSV);
+
+
+        function renderCustomTable() {
+            customDataTableBody.innerHTML = '';
+            if (customTableEntries.length === 0) { customTablePlaceholder.style.display = 'block'; customDataTableContainer.style.display = 'none'; exportCustomTableButton.style.display = 'none'; return; }
+            customTablePlaceholder.style.display = 'none'; customDataTableContainer.style.display = 'block'; exportCustomTableButton.style.display = 'block';
+            customTableEntries.forEach((entry, index) => {
+                const row = customDataTableBody.insertRow(); row.dataset.index = index;
+                const cellId = row.insertCell(); cellId.textContent = entry.id; cellId.contentEditable = "true";
+                cellId.addEventListener('blur', (e) => updateCustomTableEntry(index, 'id', e.target.textContent));
+                const cellDesc = row.insertCell(); cellDesc.textContent = entry.description; cellDesc.contentEditable = "true";
+                cellDesc.addEventListener('blur', (e) => updateCustomTableEntry(index, 'description', e.target.textContent));
+                const cellNotes = row.insertCell(); cellNotes.textContent = entry.notes; cellNotes.contentEditable = "true";
+                cellNotes.addEventListener('blur', (e) => updateCustomTableEntry(index, 'notes', e.target.textContent));
+                const cellAction = row.insertCell(); const deleteBtn = document.createElement('button');
+                deleteBtn.innerHTML = '<i class="fas fa-times"></i>'; deleteBtn.title = "Elimina Riga";
+                deleteBtn.classList.add('delete-row-btn'); deleteBtn.onclick = () => deleteCustomTableRow(index);
+                cellAction.appendChild(deleteBtn);
+            });
+        }
+        function updateCustomTableEntry(index, field, value) { if (customTableEntries[index]) { customTableEntries[index][field] = value.trim(); } }
+        function addCustomTableRow() { customTableEntries.push({ id: `ID-${customTableEntries.length + 1}`, description: "", notes: "" }); renderCustomTable(); showInfo("Nuova riga aggiunta alla tabella personalizzata. Modifica le celle."); }
+        addCustomTableRowButton.addEventListener('click', addCustomTableRow);
+        function deleteCustomTableRow(index) { customTableEntries.splice(index, 1); renderCustomTable(); showInfo("Riga eliminata dalla tabella personalizzata."); }
+        clearCustomTableButton.addEventListener('click', () => {
+            if (customTableEntries.length === 0) { showInfo('La tabella personalizzata è già vuota.'); return; }
+            confirmClearModalText.textContent = "Sei sicuro di voler cancellare tutte le righe della tabella personalizzata?";
+            confirmClearModal.classList.add('active');
+        });
+        function exportCustomTableToCSV() {
+            if (customTableEntries.length === 0) { showInfo('Nessun dato nella tabella personalizzata da esportare.'); return; }
+            showInfo('Preparazione dati CSV tabella personalizzata...'); loader.style.display = 'block';
+            setTimeout(() => {
+                try {
+                    const headers = ["ID/Etichetta", "Descrizione", "Note"]; const csvRows = [headers.join(',')];
+                    customTableEntries.forEach(entry => { const row = [escapeCSV(entry.id), escapeCSV(entry.description), escapeCSV(entry.notes)]; csvRows.push(row.join(',')); });
+                    const csvString = csvRows.join('\n'); const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a'); const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url); link.setAttribute('download', 'tabella_dati_personalizzata.csv');
+                    link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    showInfo('Tabella dati personalizzata esportata con successo in CSV!');
+                } catch (err) { console.error("Errore export CSV tabella personalizzata:", err); showInfo('Errore esportazione tabella dati personalizzata.'); }
+                finally { loader.style.display = 'none'; }
+            }, 50);
+        }
+        exportCustomTableButton.addEventListener('click', exportCustomTableToCSV);
+
+        function displayChatMessage(messageContent, senderType) {
+            const messageDiv = document.createElement('div'); messageDiv.classList.add('chat-message', senderType);
+            if (typeof messageContent === 'string') { const textElement = document.createElement('p'); textElement.textContent = messageContent; messageDiv.appendChild(textElement); } 
+            else if (typeof messageContent === 'object' && messageContent !== null) {
+                if (messageContent.text) { const textElement = document.createElement('p'); textElement.textContent = messageContent.text; messageDiv.appendChild(textElement); }
+                if (messageContent.imageSrc) { const imgElement = document.createElement('img'); imgElement.src = messageContent.imageSrc; imgElement.alt = messageContent.imageFileName || "Immagine inviata"; messageDiv.appendChild(imgElement); }
+            }
+            aiChatDisplay.appendChild(messageDiv); aiChatDisplay.scrollTop = aiChatDisplay.scrollHeight;
+        }
+        function resetAiChatImageSelection() { currentAiChatImage.base64 = null; currentAiChatImage.mimeType = null; currentAiChatImage.fileName = null; aiChatImagePreview.src = "#"; aiChatImagePreviewContainer.style.display = 'none'; aiChatFileInput.value = ""; }
+        async function handleSendAiPrompt() {
+            const promptText = aiChatPromptInput.value.trim();
+            if (!promptText && !currentAiChatImage.base64) { displayChatMessage("Per favore, inserisci un prompt o allega un'immagine.", "error"); return; }
+            const messageParts = [];
+            if (promptText) { messageParts.push({ text: promptText }); }
+            if (currentAiChatImage.base64 && currentAiChatImage.mimeType) { messageParts.push({ inlineData: { mimeType: currentAiChatImage.mimeType, data: currentAiChatImage.base64 } }); }
+            const userMessageForDisplay = {};
+            if (promptText) userMessageForDisplay.text = promptText;
+            if (currentAiChatImage.base64) { userMessageForDisplay.imageSrc = `data:${currentAiChatImage.mimeType};base64,${currentAiChatImage.base64}`; userMessageForDisplay.imageFileName = currentAiChatImage.fileName; }
+            displayChatMessage(userMessageForDisplay, "user"); aiChatHistory.push({ role: "user", parts: messageParts });
+            aiChatPromptInput.value = ""; resetAiChatImageSelection();
+            aiChatLoader.style.display = 'block'; sendAiPromptButton.disabled = true; attachAiFileButton.disabled = true;
+            const payload = { contents: aiChatHistory }; const apiKey = ""; 
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+            try {
+                const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!response.ok) { const errorData = await response.json(); throw new Error(`Errore API: ${errorData.error?.message || response.statusText}`); }
+                const result = await response.json();
+                if (result.candidates && result.candidates.length > 0 && result.candidates[0].content && result.candidates[0].content.parts && result.candidates[0].content.parts.length > 0) {
+                    const aiResponseText = result.candidates[0].content.parts[0].text;
+                    displayChatMessage(aiResponseText, "ai"); aiChatHistory.push({ role: "model", parts: [{ text: aiResponseText }] });
+                } else { displayChatMessage("L'AI non ha fornito una risposta valida.", "error"); if(aiChatHistory.length > 0 && aiChatHistory[aiChatHistory.length -1].role === "user") { aiChatHistory.pop(); }}
+            } catch (error) { displayChatMessage(`Si è verificato un errore: ${error.message}`, "error"); if(aiChatHistory.length > 0 && aiChatHistory[aiChatHistory.length -1].role === "user") { aiChatHistory.pop(); }}
+            finally { aiChatLoader.style.display = 'none'; sendAiPromptButton.disabled = false; attachAiFileButton.disabled = false; aiChatPromptInput.focus(); }
+        }
+        openAiChatButton.addEventListener('click', () => {
+            aiChatModal.classList.add('active');
+            if (aiChatDisplay.children.length === 0) { displayChatMessage("Ciao! Come posso aiutarti oggi? Puoi inviarmi testo e immagini.", "ai"); aiChatHistory = [{ role: "model", parts: [{text: "Ciao! Come posso aiutarti oggi? Puoi inviarmi testo e immagini."}]}];}
+            aiChatPromptInput.focus();
+        });
+        closeAiChatButton.addEventListener('click', () => { aiChatModal.classList.remove('active'); resetAiChatImageSelection(); });
+        aiChatModal.addEventListener('click', (event) => { if (event.target === aiChatModal) { aiChatModal.classList.remove('active'); resetAiChatImageSelection(); }});
+        attachAiFileButton.addEventListener('click', () => { aiChatFileInput.click(); });
+        aiChatFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) => { currentAiChatImage.base64 = e.target.result.split(',')[1]; currentAiChatImage.mimeType = file.type; currentAiChatImage.fileName = file.name; aiChatImagePreview.src = e.target.result; aiChatImagePreviewContainer.style.display = 'block'; };
+                reader.readAsDataURL(file);
+            } else if (file) { displayChatMessage("Formato file non supportato per la chat.", "error"); resetAiChatImageSelection(); }
+        });
+        removeAiChatImageButton.addEventListener('click', () => { resetAiChatImageSelection(); });
+        sendAiPromptButton.addEventListener('click', handleSendAiPrompt);
+        aiChatPromptInput.addEventListener('keypress', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSendAiPrompt(); }});
+
+        window.addEventListener('resize', () => { setupCanvasLayout(); redrawCanvas(); });
+        // Nascondi i pulsanti di esportazione tabella all'inizio
+        exportCsvQuotesButton.style.display = 'none';
+        exportCustomTableButton.style.display = 'none';
+
+        setupCanvasLayout(); updateUIDisplays(); populateTable(); renderCustomTable(); 
+        showInfo('Benvenuto! Carica un disegno, annota, misura, gestisci dati o chatta con l\'AI.');
+    </script>
+</body>
+</html>
