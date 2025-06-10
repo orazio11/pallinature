@@ -1,0 +1,2774 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>App Posizionamento Bollini & Dati (v7.4 - Calcolo Fori con Tabella)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.min.js"></script>
+    <script>
+        if (typeof pdfjsLib !== 'undefined') {
+            pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.11.338/pdf.worker.min.js';
+        } else {
+            console.error("PDF.js library not loaded.");
+        }
+    </script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .drawing-area {
+            position: relative;
+            width: 100%; 
+            height: 60vh; 
+            overflow: hidden; 
+            background-color: #2d3748; 
+            border: 1px solid #4b5563;
+            border-radius: 0.375rem; 
+            margin: auto;
+        }
+        #drawingCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: auto; 
+            cursor: default;
+        }
+        #drawingCanvas.panning-cursor { cursor: grab; }
+        #drawingCanvas.panning-active-cursor { cursor: grabbing; }
+        #drawingCanvas.crosshair-mode-active, 
+        #drawingCanvas.set-origin-mode-active,
+        #drawingCanvas.set-cnc-zero-mode-active,
+        #drawingCanvas.get-coords-mode-active,
+        #drawingCanvas.place-snap-point-mode-active,
+        #drawingCanvas.define-tool-path-mode-active,
+        #drawingCanvas.pick-bolt-circle-center-mode-active { cursor: none; }
+        #drawingCanvas.cell-cursor { cursor: cell; }
+        #drawingCanvas.delete-mode.over-bollino,
+        #drawingCanvas.draggable-bollino-hover {
+             cursor: pointer;
+        }
+        #drawingCanvas.dragging-bollino {
+            cursor: grabbing;
+        }
+
+        #loupeCanvas { 
+            position: absolute;
+            border: 2px solid #f59e0b; 
+            border-radius: 50%; 
+            pointer-events: none; 
+            display: none; 
+            z-index: 1001; 
+            background-color: rgba(255, 255, 255, 0.8); 
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+            overflow: hidden; 
+        }
+
+
+        #drawingImage { 
+            display: none;
+        }
+        .table-container, .custom-table-container, .toolpath-table-container, .bolt-circle-results-container {
+            max-height: 180px; 
+            overflow-y: auto;
+            border: 1px solid #4b5563;
+            border-radius: 0.375rem;
+            margin-bottom: 0.5rem; 
+        }
+        .selected-row {
+            background-color: #4a5568 !important;
+            font-weight: 600;
+        }
+        .selected-row td {
+            color: #e2e8f0 !important;
+        }
+        .info-box {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            background-color: rgba(17, 24, 39, 0.9);
+            color: #e5e7eb;
+            padding: 10px 15px;
+            border-radius: 8px;
+            font-size: 0.9em;
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            max-width: 90%;
+        }
+        .scale-display {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background-color: rgba(17, 24, 39, 0.9);
+            color: #e5e7eb;
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 0.75em; 
+            z-index: 1000;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+            text-align: right;
+            line-height: 1.4; 
+        }
+         #loader, #aiChatLoader {
+            border: 6px solid #4b5563;
+            border-top: 6px solid #3b82f6;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+            z-index: 1500; 
+        }
+        #loader { width: 60px; height: 60px; }
+
+        @keyframes spin {
+            0% { transform: translate(-50%, -50%) rotate(0deg); }
+            100% { transform: translate(-50%, -50%) rotate(360deg); }
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.75);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        .modal-content {
+            background-color: #1f2937;
+            color: #e5e7eb;
+            padding: 25px 30px;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.4);
+            text-align: center;
+            width: 90%;
+            max-width: 400px;
+        }
+        #aiChatModal .modal-content {
+            max-width: 700px; height: 80vh; display: flex; flex-direction: column;
+        }
+        #boltCircleModal .modal-content {
+            max-width: 800px;
+        }
+        .file-input-container {
+            border: 2px dashed #4b5563; padding: 15px; border-radius: 8px; background-color: #374151; 
+        }
+        
+        .controls-section {
+            margin-bottom: 0.6rem; 
+        }
+        .controls-section h3 {
+             font-size: 0.85rem; 
+             font-weight: 600; 
+             color: #d1d5db; 
+             margin-bottom: 0.4rem; 
+             text-align: left;
+        }
+        .button-group {
+            display: flex;
+            flex-wrap: wrap; 
+            gap: 0.4rem; 
+            margin-bottom: 0.4rem; 
+        }
+        .button-group button, .controls-group button, .export-button, .file-input-container label button,
+        .toolpath-controls-group button {
+            background-color: #4b5563; 
+            color: white;
+            font-weight: 600; 
+            padding: 0.3rem 0.6rem; 
+            border-radius: 0.375rem; 
+            transition: background-color 0.15s ease-in-out;
+            font-size: 0.68rem; 
+            line-height: 1.1rem; 
+            flex-grow: 1; 
+            min-width: 100px; 
+        }
+        .button-group button:hover, .controls-group button:hover, .export-button:hover, 
+        .file-input-container label button:hover, .toolpath-controls-group button:hover {
+            background-color: #5a6678; 
+        }
+         .button-group button:disabled, .controls-group button:disabled, .export-button:disabled, 
+         .file-input-container label button:disabled, .toolpath-controls-group button:disabled {
+            background-color: #374151; 
+            color: #9ca3af; 
+            cursor: not-allowed;
+        }
+         .button-group button.active-mode-btn { 
+            background-color: #f59e0b; border-color: #d97706;
+        }
+        .button-group button.active-mode-btn:hover {
+            background-color: #d97706;
+        }
+        .button-group button.snap-point-btn { background-color: #d946ef; } 
+        .button-group button.snap-point-btn:hover { background-color: #c026d3; }
+        .button-group button.snap-point-btn.active-mode-btn { background-color: #a21caf; border-color: #86198f;}
+        .button-group button.snap-point-btn.active-mode-btn:hover { background-color: #86198f;}
+        .button-group button.clear-snap-btn { background-color: #78350f; } 
+        .button-group button.clear-snap-btn:hover { background-color: #52230A; }
+
+        .export-button.emerald { background-color: #059669; } 
+        .export-button.emerald:hover { background-color: #047857; }
+        .export-button.sky { background-color: #0ea5e9; } 
+        .export-button.sky:hover { background-color: #0284c7; }
+
+        #labelInputModal .modal-content, #sequentialLabelInputModal .modal-content, 
+        #calibrateScaleModal .modal-content, #cncOriginNameModal .modal-content,
+        #boltCircleModal .modal-content { text-align: left; }
+        #labelInputModal input, #sequentialLabelInputModal input, #calibrateScaleModal input, 
+        #cncOriginNameModal input, #aiChatPromptInput, #virtualToolDiameterInput, 
+        #manualToolPathXInput, #manualToolPathYInput, #boltCircleModal input {
+            width: 100%; padding: 8px 10px; margin-bottom: 12px; border: 1px solid #4b5563;
+            border-radius: 6px; font-size: 0.9rem; background-color: #374151; color: #e5e7eb;
+        }
+        #aiChatPromptInput { padding: 10px 12px; font-size: 1rem; margin-bottom: 15px; }
+        #boltCircleModal .input-group { display: flex; gap: 10px; align-items: center; }
+        #boltCircleModal .input-group input { margin-bottom: 0; }
+        #boltCircleModal .input-group .pick-center-btn { flex-shrink: 0; padding: 6px 10px; font-size: 0.8rem;}
+
+        #labelInputModal input::placeholder, #sequentialLabelInputModal input::placeholder,
+        #calibrateScaleModal input::placeholder, #cncOriginNameModal input::placeholder, 
+        #aiChatPromptInput::placeholder, #virtualToolDiameterInput::placeholder, 
+        #manualToolPathXInput::placeholder, #manualToolPathYInput::placeholder, #boltCircleModal input::placeholder { color: #9ca3af; }
+
+
+        .dark-file-input::-webkit-file-upload-button, 
+        .gcode-file-input::-webkit-file-upload-button {
+            background-color: #4f46e5; color: white; border: none; padding: 0.5rem 1rem; 
+            border-radius: 0.375rem; font-size: 0.8rem; font-weight: 600; margin-right: 0.75rem;
+            cursor: pointer; transition: background-color 0.15s ease-in-out;
+        }
+        .dark-file-input::-webkit-file-upload-button:hover,
+        .gcode-file-input::-webkit-file-upload-button:hover { background-color: #4338ca; }
+        
+        .dark-file-input-green::-webkit-file-upload-button {
+            background-color: #059669; color: white; border: none; padding: 0.5rem 1rem; 
+            border-radius: 0.375rem; font-size: 0.8rem; font-weight: 600; margin-right: 0.75rem;
+            cursor: pointer; transition: background-color 0.15s ease-in-out;
+        }
+        .dark-file-input-green::-webkit-file-upload-button:hover { background-color: #047857; }
+        .dark-file-input, .gcode-file-input { color: #9ca3af; font-size: 0.9rem; }
+        .gcode-file-input::-webkit-file-upload-button { background-color: #ca8a04; } 
+        .gcode-file-input::-webkit-file-upload-button:hover { background-color: #a16207; }
+
+
+        #aiChatDisplay {
+            flex-grow: 1; overflow-y: auto; padding: 10px; background-color: #2d3748;
+            border-radius: 8px; margin-bottom: 10px; border: 1px solid #4a5568;
+        }
+        .chat-message {
+            padding: 8px 12px; border-radius: 6px; margin-bottom: 8px; max-width: 85%;
+            word-wrap: break-word; display: flex; flex-direction: column;
+        }
+        .chat-message.user { background-color: #4f46e5; color: white; margin-left: auto; align-items: flex-end; }
+        .chat-message.ai { background-color: #374151; color: #e5e7eb; margin-right: auto; align-items: flex-start; }
+        .chat-message.error { background-color: #c53030; color: white; text-align: center; align-items: center; }
+        .chat-message img { max-width: 200px; max-height: 200px; border-radius: 4px; margin-top: 5px; border: 1px solid #4a5568; }
+        #aiChatImagePreviewContainer { margin-bottom: 10px; text-align: center; position: relative; }
+        #aiChatImagePreview { max-width: 150px; max-height: 100px; border-radius: 4px; border: 1px solid #4b5563; }
+        #removeAiChatImageButton {
+            position: absolute; top: -8px; right: calc(50% - 85px); background-color: rgba(200, 50, 50, 0.8);
+            color: white; border: none; border-radius: 50%; width: 24px; height: 24px;
+            font-size: 14px; line-height: 24px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+        }
+        #aiChatInputContainer { display: flex; gap: 10px; align-items: center; }
+        #aiChatPromptInput { flex-grow: 1; margin-bottom: 0; resize: none; min-height: 44px; }
+        #attachAiFileButton { background: none; border: none; color: #9ca3af; font-size: 1.5rem; cursor: pointer; padding: 5px; }
+        #attachAiFileButton:hover { color: #e5e7eb; }
+        #sendAiPromptButton { padding: 10px 18px; }
+        #aiChatFileInput { display: none; }
+
+        .controls-group, .toolpath-controls-group {
+            display: flex;
+            gap: 0.5rem; 
+            margin-bottom: 0.5rem; 
+            justify-content: center;
+            align-items: center;
+        }
+       
+        .controls-group .label, .toolpath-controls-group .label {
+            font-size: 0.8rem; 
+            color: #d1d5db; 
+            margin-right: 0.25rem; 
+            white-space: nowrap; 
+        }
+        .table-container th, .table-container td,
+        .custom-table-container th, .custom-table-container td,
+        .toolpath-table-container th, .toolpath-table-container td,
+        .bolt-circle-results-container th, .bolt-circle-results-container td {
+            padding: 0.375rem 0.5rem; 
+            font-size: 0.8rem;
+            border: 1px solid #4b5563;
+        }
+        .table-container td[contenteditable="true"], 
+        .custom-table-container td[contenteditable="true"] { 
+            background-color: #374151;
+        }
+        .table-container td[contenteditable="true"]:focus,
+        .custom-table-container td[contenteditable="true"]:focus {
+            background-color: #4b5563;
+            outline: 1px solid #60a5fa;
+        }
+        .delete-row-btn {
+            background-color: #ef4444; 
+            color: white;
+            padding: 0.25rem 0.5rem; 
+            border-radius: 0.25rem; 
+            font-size: 0.75rem; 
+        }
+        .delete-row-btn:hover {
+            background-color: #dc2626; 
+        }
+        .origin-marker-color { color: #10b981; } 
+        .cnc-origin-btn-color { background-color: #6366f1 !important; } 
+        .cnc-origin-btn-color:hover { background-color: #4f46e5 !important; }
+        .cnc-origin-btn-color.active-mode-btn { background-color: #4338ca !important; border-color: #3730a3 !important; }
+        .cnc-origin-btn-color.active-mode-btn:hover { background-color: #3730a3 !important;}
+        .gcode-related-btn-color { background-color: #eab308 !important; } 
+        .gcode-related-btn-color:hover { background-color: #ca8a04 !important; }
+        .toolpath-btn-color { background-color: #06b6d4 !important; } 
+        .toolpath-btn-color:hover { background-color: #0891b2 !important; }
+        .toolpath-btn-color.active-mode-btn { background-color: #0e7490 !important; border-color: #155e75 !important; }
+        .toolpath-btn-color.active-mode-btn:hover { background-color: #155e75 !important;}
+        .bolt-circle-btn-color { background-color: #db2777 !important; }
+        .bolt-circle-btn-color:hover { background-color: #be185d !important; }
+
+        #toolPathReferenceOriginSelect {
+            background-color: #374151;
+            color: #e5e7eb;
+            border: 1px solid #4b5563;
+            border-radius: 0.375rem;
+            padding: 0.3rem 0.6rem;
+            font-size: 0.75rem;
+            flex-grow: 1;
+            min-width: 150px; 
+        }
+        .toolpath-input-group {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        .toolpath-input-group label {
+            font-size: 0.75rem;
+            color: #d1d5db;
+            white-space: nowrap;
+        }
+        .toolpath-input-group input[type="number"] {
+            width: auto; 
+            flex-grow: 1;
+            padding: 6px 8px;
+            font-size: 0.8rem;
+            margin-bottom: 0; 
+        }
+        .toolpath-checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .toolpath-checkbox-group label {
+            font-size: 0.8rem;
+            color: #d1d5db;
+        }
+        #showToolPathLinesCheckbox {
+            width: 1rem; height: 1rem;
+            accent-color: #06b6d4; 
+        }
+        #boltCirclePreviewCanvas {
+            background-color: #2d3748;
+            border-radius: 0.375rem;
+            border: 1px solid #4b5563;
+            width: 150px;
+            height: 150px;
+        }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-300 p-3 md:p-4"> 
+    <div class="container mx-auto bg-gray-800 p-4 md:p-6 rounded-xl shadow-2xl"> 
+        <header class="mb-6 text-center">
+            <img src="https://placehold.co/400x70/2d3748/9ca3af?text=Annotazioni+Tecniche+Precisione" alt="Banner Annotazioni Tecniche e Precisione" class="mx-auto mb-3 rounded-lg shadow-md" style="max-width: 350px; height: auto;">
+            <h1 class="text-xl md:text-3xl font-bold text-white">App Posizionamento Bollini & Dati (v7.4)</h1> 
+            <p class="text-gray-400 mt-1 text-xs md:text-sm">Origini CNC, Punti G-Code, Percorso Fresa, Fori Circonferenza, Loupe, PDF.</p> 
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4"> 
+            <div class="file-input-container">
+                <label for="imageUpload" class="block text-xs font-medium text-gray-300 mb-1">1. Carica Disegno (Immagine/SVG/PDF):</label>
+                <input type="file" id="imageUpload" accept="image/*,image/svg+xml,application/pdf" class="block w-full text-sm dark-file-input"/>
+                <p id="imageUploadError" class="text-red-500 text-xs mt-1"></p>
+            </div>
+            <div class="file-input-container">
+                <label for="csvUpload" class="block text-xs font-medium text-gray-300 mb-1">2. Carica Quote Bollini (CSV - Opz.):</label>
+                <input type="file" id="csvUpload" accept=".csv" class="block w-full text-sm dark-file-input-green"/>
+                <p id="csvUploadError" class="text-red-500 text-xs mt-1"></p>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4"> 
+            <div class="md:col-span-2 bg-gray-750 p-2 md:p-3 rounded-lg shadow-md"> 
+                <h2 class="text-md md:text-lg font-semibold text-gray-100 mb-2 text-center">Disegno</h2> 
+                <div class="controls-group">
+                    <span class="label">Zoom:</span>
+                    <button id="zoomOutButton" title="Zoom Out"><i class="fas fa-search-minus"></i></button>
+                    <button id="resetZoomButton" title="Reset Zoom"><i class="fas fa-expand"></i></button>
+                    <button id="zoomInButton" title="Zoom In"><i class="fas fa-search-plus"></i></button>
+                </div>
+                <div class="controls-group mb-2">
+                    <span class="label">Dim. Bollini:</span>
+                    <button id="bollinoSizeDecreaseButton" title="Riduci Bollini"><i class="fas fa-minus-circle"></i></button>
+                    <button id="bollinoSizeResetButton" title="Reset Dim. Bollini"><i class="fas fa-circle"></i></button>
+                    <button id="bollinoSizeIncreaseButton" title="Ingrandisci Bollini"><i class="fas fa-plus-circle"></i></button>
+                </div>
+                <div id="drawingArea" class="drawing-area">
+                    <img id="drawingImage" src="https://placehold.co/800x600/374151/9ca3af?text=Carica+un+disegno" alt="Disegno Tecnico Sorgente"/>
+                    <canvas id="drawingCanvas"></canvas>
+                    <canvas id="loupeCanvas"></canvas> 
+                    <div id="loader"></div> 
+                </div>
+                 <div id="imageError" class="text-center text-red-500 mt-1 text-xs"></div> 
+            </div>
+
+            <div class="md:col-span-1 bg-gray-750 p-2 md:p-3 rounded-lg shadow-md flex flex-col"> 
+                <h2 class="text-md md:text-lg font-semibold text-gray-100 mb-2">Controlli</h2> 
+                
+                <div class="controls-section">
+                    <h3>Strumenti Disegno & Misura</h3>
+                    <div class="button-group">
+                        <button id="toggleSetOriginModeButton" title="Imposta un punto di origine (0,0) principale per il disegno (ALT per Loupe)" class="origin-marker-color"><i class="fas fa-crosshairs mr-1"></i>Imposta Origine Disegno</button>
+                        <button id="toggleCalibrateScaleModeButton" title="Definisci una scala basata su una quota nota (ALT per Loupe)"><i class="fas fa-ruler-combined mr-1"></i>Calibra Scala</button>
+                    </div>
+                     <div class="button-group">
+                        <button id="toggleMeasureDistanceModeButton" title="Misura distanze sul disegno (richiede calibrazione, ALT per Loupe)"><i class="fas fa-drafting-compass mr-1"></i>Misura Dist.</button>
+                        <button id="toggleGetCoordsModeButton" title="Leggi coordinate X,Y relative alle origini definite (richiede origine/i e calibrazione, ALT per Loupe)"><i class="fas fa-map-marker-alt mr-1"></i>Leggi Coord.</button>
+                    </div>
+                </div>
+
+                 <div class="controls-section"> 
+                    <h3>Punti di Snap Manuali</h3>
+                    <div class="button-group">
+                        <button id="togglePlaceSnapPointModeButton" title="Piazza punti di aggancio manuali sul disegno (ALT per Loupe)" class="snap-point-btn"><i class="fas fa-thumbtack mr-1"></i>Piazza P.to Snap</button>
+                        <button id="clearSnapPointsButton" title="Cancella tutti i punti di snap manuali" class="clear-snap-btn"><i class="fas fa-eraser mr-1"></i>Canc. P.ti Snap</button>
+                    </div>
+                     <div class="text-xs text-gray-400 mb-2">Usa ALT in modalità di posizionamento/misura per attivare la Loupe di precisione.</div>
+                </div>
+
+                <!-- NUOVA SEZIONE CALCOLI GEOMETRICI -->
+                <div class="controls-section">
+                    <h3>Calcoli Geometrici</h3>
+                    <div class="button-group">
+                        <button id="openBoltCircleCalculatorButton" title="Calcola e posiziona fori su una circonferenza" class="bolt-circle-btn-color"><i class="fas fa-circle-notch mr-1"></i>Fori su Circonferenza</button>
+                        <button id="clearBoltCirclePointsButton" title="Cancella tutti i fori da circonferenza" class="bg-red-700 hover:bg-red-800"><i class="fas fa-trash-alt mr-1"></i>Canc. Fori Circ.</button>
+                    </div>
+                </div>
+                
+                <div class="controls-section">
+                    <h3>Origini CNC & G-Code</h3>
+                     <div class="button-group">
+                        <button id="toggleSetCNCOriginModeButton" title="Imposta un punto di origine CNC specifico (es. G54, G55) (ALT per Loupe)" class="cnc-origin-btn-color"><i class="fas fa-map-pin mr-1"></i>Imposta Origine CNC</button>
+                        <button id="clearCNCOriginsButton" title="Cancella tutte le origini CNC definite" class="bg-red-700 hover:bg-red-800"><i class="fas fa-trash-alt mr-1"></i>Canc. Origini CNC</button>
+                    </div>
+                    <div class="file-input-container mt-2 mb-2 py-2 px-2">
+                         <label for="gcodeUpload" class="block text-xs font-medium text-gray-300 mb-1"><i class="fas fa-file-code mr-1"></i>3. Carica G-Code (Punti - Opz.):</label>
+                         <input type="file" id="gcodeUpload" accept=".nc,.gcode,.tap,.txt" class="block w-full text-sm gcode-file-input"/>
+                         <p id="gcodeUploadError" class="text-red-500 text-xs mt-1"></p>
+                    </div>
+                    <div class="button-group">
+                        <button id="clearGCodePointsButton" title="Cancella tutti i punti G-Code visualizzati" class="gcode-related-btn-color"><i class="fas fa-eraser mr-1"></i>Canc. Punti G-Code</button>
+                    </div>
+                </div>
+                
+                <div class="controls-section">
+                    <h3>Definizione Percorso Fresa</h3>
+                    <div class="button-group">
+                        <button id="toggleDefineToolPathModeButton" title="Attiva/Disattiva la modalità di definizione del percorso fresa (ALT per Loupe)" class="toolpath-btn-color"><i class="fas fa-route mr-1"></i>Modalità Percorso Fresa</button>
+                    </div>
+                    <div class="toolpath-controls-group mt-2">
+                        <label for="toolPathReferenceOriginSelect" class="label">Origine Riferimento:</label>
+                        <select id="toolPathReferenceOriginSelect">
+                            <option value="">-- Seleziona Origine --</option>
+                        </select>
+                    </div>
+                    <div class="toolpath-controls-group">
+                        <label for="virtualToolDiameterInput" class="label">Diam. Fresa Virtuale:</label>
+                        <input type="number" id="virtualToolDiameterInput" value="1" min="0" step="any" placeholder="Es. 6 (mm o px)">
+                    </div>
+                    <div class="toolpath-input-group">
+                        <label for="manualToolPathXInput">X Rel:</label>
+                        <input type="number" id="manualToolPathXInput" step="any" placeholder="X">
+                        <label for="manualToolPathYInput">Y Rel:</label>
+                        <input type="number" id="manualToolPathYInput" step="any" placeholder="Y">
+                    </div>
+                    <div class="button-group">
+                         <button id="addManualToolPathPointButton" title="Aggiungi punto al percorso con le coordinate manuali sopra"><i class="fas fa-plus-square mr-1"></i>Aggiungi Punto Manuale</button>
+                    </div>
+                    <div class="toolpath-checkbox-group">
+                        <input type="checkbox" id="showToolPathLinesCheckbox" checked>
+                        <label for="showToolPathLinesCheckbox">Visualizza Linee Percorso</label>
+                    </div>
+                     <div class="button-group">
+                        <button id="clearToolPathButton" title="Cancella l'intero percorso fresa definito" class="bg-red-700 hover:bg-red-800"><i class="fas fa-trash-alt mr-1"></i>Cancella Percorso</button>
+                    </div>
+                    <div id="toolPathTablePlaceholder" class="text-center text-gray-400 py-1 text-xs">Nessun punto percorso definito.</div>
+                    <div class="toolpath-table-container" style="display: none;">
+                        <table class="min-w-full divide-y divide-gray-700">
+                            <thead class="bg-gray-650 sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">#</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Origine Rif.</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">X Rel.</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Y Rel.</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Azione</th>
+                                </tr>
+                            </thead>
+                            <tbody id="toolPathTableBody" class="bg-gray-700 divide-y divide-gray-600">
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+
+                <div class="controls-section">
+                    <h3>Modalità Annotazione Bollini</h3>
+                    <div class="button-group">
+                        <button id="toggleFreeAnnotationModeButton" title="Aggiungi bollini con etichetta personalizzata"><i class="fas fa-paint-brush mr-1"></i>Pall. Libera</button>
+                        <button id="toggleSequentialAnnotationModeButton" title="Aggiungi bollini con etichetta numerica sequenziale"><i class="fas fa-list-ol mr-1"></i>Pall. Seq.</button>
+                        <button id="toggleDeleteModeButton" title="Rimuovi bollini cliccandoli"><i class="fas fa-eraser mr-1"></i>Cancella Boll.</button>
+                    </div>
+                </div>
+                
+                <hr class="border-gray-600 my-1"> 
+                <div id="csvQuotesSection" class="controls-section">
+                    <h3>Quote da CSV (Editabile)</h3>
+                    <div id="tablePlaceholder" class="text-center text-gray-400 py-1 text-xs flex-grow">Carica un CSV per le quote o usa la pallinatura.</div>
+                    <div class="table-container" style="display: none;">
+                        <table class="min-w-full divide-y divide-gray-700">
+                            <thead class="bg-gray-650 sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Lettera</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Testo Quota</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Tolleranza</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Misurato</th>
+                                </tr>
+                            </thead>
+                            <tbody id="dimensionsTableBody" class="bg-gray-700 divide-y divide-gray-600">
+                            </tbody>
+                        </table>
+                    </div>
+                    <button id="exportCsvQuotesButton" class="export-button emerald w-full mt-1"><i class="fas fa-file-csv mr-1"></i>Esporta Quote CSV</button>
+                </div>
+
+                <hr class="border-gray-600 my-1">
+
+                <div id="customDataSection" class="controls-section">
+                    <h3>Tabella Dati Personalizzata</h3>
+                    <div class="button-group mb-1">
+                        <button id="addCustomTableRowButton" class="bg-green-600 hover:bg-green-700"><i class="fas fa-plus-circle mr-1"></i>Aggiungi Riga</button>
+                        <button id="clearCustomTableButton" class="bg-red-600 hover:bg-red-700"><i class="fas fa-trash-alt mr-1"></i>Svuota Tabella</button>
+                    </div>
+                    <div id="customTablePlaceholder" class="text-center text-gray-400 py-1 text-xs">Aggiungi righe per inserire i tuoi dati.</div>
+                    <div class="custom-table-container" style="display: none;">
+                        <table id="customDataTable" class="min-w-full divide-y divide-gray-700">
+                            <thead id="customDataTableHead" class="bg-gray-650 sticky top-0 z-10">
+                                <tr>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ID/Etichetta</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Descrizione</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Note</th>
+                                    <th class="px-2 py-1.5 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Azione</th>
+                                </tr>
+                            </thead>
+                            <tbody id="customDataTableBody" class="bg-gray-700 divide-y divide-gray-600">
+                            </tbody>
+                        </table>
+                    </div>
+                     <button id="exportCustomTableButton" class="export-button sky w-full mt-1"><i class="fas fa-file-csv mr-1"></i>Esporta Tabella Custom</button>
+                </div>
+
+                <hr class="border-gray-600 my-1">
+
+                <div class="controls-section">
+                    <h3>Azioni Generali</h3>
+                     <div class="button-group">
+                        <button id="exportButton"><i class="fas fa-camera-retro mr-1"></i>Esporta Disegno</button>
+                        <button id="exportDataButton"><i class="fas fa-file-export mr-1"></i>Esporta Dati Generali</button>
+                        <button id="clearBolliniButton"><i class="fas fa-broom mr-1"></i>Canc. Tutti Bollini</button>
+                        <button id="openAiChatButton" class="bg-indigo-600 hover:bg-indigo-700"><i class="fas fa-comments mr-1"></i>Chat AI</button>
+                    </div>
+                </div>
+
+                <hr class="border-gray-600 my-1">
+
+                <div class="controls-section">
+                    <h3>Link Esterno ChatGPT</h3>
+                    <div class="mb-2">
+                        <button id="openExternalChatGPTButton" class="bg-fuchsia-600 hover:bg-fuchsia-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150 w-full">
+                            <i class="fas fa-external-link-alt mr-1"></i>Cataloghi Utensili
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+         <div id="infoBox" class="info-box" style="display: none;"></div>
+         <div id="scaleDisplay" class="scale-display" style="display: none;">Scala non calibrata | Zoom: 100% | Dim. Bollini: 100% <br> Origine Disegno: Non impostata</div>
+    </div>
+
+    <div id="confirmClearModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-lg font-semibold text-gray-100 mb-3">Conferma Cancellazione</h3>
+            <p id="confirmClearModalText" class="text-gray-400 mb-5 text-sm">Procedere?</p>
+            <div class="flex justify-center gap-4">
+                <button id="confirmClearYes" class="bg-red-600 hover:bg-red-700 text-white font-semibold py-2 px-5 rounded-lg text-sm transition duration-150">Sì</button>
+                <button id="confirmClearNo" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-5 rounded-lg text-sm transition duration-150">Annulla</button>
+            </div>
+        </div>
+    </div>
+    <div id="labelInputModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-lg font-semibold text-gray-100 mb-4">Inserisci Etichetta Bollino</h3>
+            <input type="text" id="bollinoLabelInput" placeholder="Es. A1, Nota, X..." class="mb-4">
+            <div class="flex justify-end gap-3">
+                <button id="confirmLabelButton" class="bg-green-500 hover:bg-green-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Conferma</button>
+                <button id="cancelLabelButton" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Annulla</button>
+            </div>
+        </div>
+    </div>
+    <div id="sequentialLabelInputModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-lg font-semibold text-gray-100 mb-4">Imposta Pallinatura Sequenziale</h3>
+            <div>
+                <label for="sequentialPrefixInput" class="block text-sm font-medium text-gray-300 mb-1">Prefisso Etichetta (Opzionale):</label>
+                <input type="text" id="sequentialPrefixInput" placeholder="Es. A, PT-" class="mb-3">
+            </div>
+            <div>
+                <label for="sequentialStartNumberInput" class="block text-sm font-medium text-gray-300 mb-1">Numero Iniziale:</label>
+                <input type="number" id="sequentialStartNumberInput" value="1" min="0" class="mb-4">
+            </div>
+            <div class="flex justify-end gap-3">
+                <button id="confirmSequentialLabelButton" class="bg-teal-500 hover:bg-teal-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Avvia Sequenza</button>
+                <button id="cancelSequentialLabelButton" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Annulla</button>
+            </div>
+        </div>
+    </div>
+    <div id="calibrateScaleModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-lg font-semibold text-gray-100 mb-4">Inserisci Valore Reale Quota</h3>
+            <div>
+                <label for="realDimensionInput" class="block text-sm font-medium text-gray-300 mb-1">Misura Reale della Quota Selezionata:</label>
+                <input type="number" id="realDimensionInput" placeholder="Es. 20.5" step="any" class="mb-3">
+            </div>
+            <div>
+                <label for="unitInput" class="block text-sm font-medium text-gray-300 mb-1">Unità di Misura:</label>
+                <input type="text" id="unitInput" value="mm" placeholder="Es. mm, cm, in" class="mb-4">
+            </div>
+            <div class="flex justify-end gap-3">
+                <button id="confirmCalibrationButton" class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Calibra</button>
+                <button id="cancelCalibrationButton" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Annulla</button>
+            </div>
+        </div>
+    </div>
+    <div id="cncOriginNameModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-lg font-semibold text-gray-100 mb-4">Inserisci Nome Origine CNC</h3>
+            <input type="text" id="cncOriginNameInput" placeholder="Es. G54, G55-OP1, Zero Pezzo" class="mb-4">
+            <div class="flex justify-end gap-3">
+                <button id="confirmCNCOriginNameButton" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Conferma</button>
+                <button id="cancelCNCOriginNameButton" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Annulla</button>
+            </div>
+        </div>
+    </div>
+    <div id="aiChatModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-xl font-semibold text-gray-100 mb-4">Chat con Assistente AI</h3>
+            <div id="aiChatDisplay"></div>
+            <div id="aiChatImagePreviewContainer" style="display: none;">
+                <img id="aiChatImagePreview" src="#" alt="Anteprima Immagine"/>
+                <button id="removeAiChatImageButton" title="Rimuovi immagine">&times;</button>
+            </div>
+            <div id="aiChatLoader" style="position: relative; margin: 10px auto;"></div>
+            <div id="aiChatInputContainer">
+                <input type="file" id="aiChatFileInput" accept="image/*">
+                <button id="attachAiFileButton" title="Allega immagine"><i class="fas fa-paperclip"></i></button>
+                <textarea id="aiChatPromptInput" placeholder="Scrivi il tuo prompt qui..." rows="2"></textarea>
+                <button id="sendAiPromptButton" class="bg-indigo-500 hover:bg-indigo-600 text-white font-semibold rounded-lg text-sm transition duration-150">Invia</button>
+            </div>
+            <button id="closeAiChatButton" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-4 rounded-lg text-sm transition duration-150 mt-4 w-full">Chiudi Chat</button>
+        </div>
+    </div>
+
+    <!-- MODAL PER CALCOLO FORI CIRCONFERENZA INTEGRATA -->
+    <div id="boltCircleModal" class="modal-overlay">
+        <div class="modal-content">
+            <h3 class="text-lg font-semibold text-gray-100 mb-4">Calcolo Fori su Circonferenza</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <!-- Colonna Input -->
+                <div class="lg:col-span-1">
+                    <label for="boltCircleCenterX" class="block text-sm font-medium text-gray-300 mb-1">Centro X (px img)</label>
+                    <div class="input-group">
+                        <input type="number" id="boltCircleCenterX" placeholder="Centro X">
+                        <button id="pickBoltCircleCenterButton" class="bg-teal-600 hover:bg-teal-700 pick-center-btn" title="Seleziona centro dal disegno"><i class="fas fa-crosshairs"></i></button>
+                    </div>
+                    
+                    <label for="boltCircleCenterY" class="block text-sm font-medium text-gray-300 mb-1 mt-2">Centro Y (px img)</label>
+                    <input type="number" id="boltCircleCenterY" placeholder="Centro Y">
+                    
+                    <label for="boltCircleRadius" class="block text-sm font-medium text-gray-300 mb-1 mt-2">Raggio (<span id="radiusUnitLabel">px</span>)</label>
+                    <input type="number" id="boltCircleRadius" placeholder="Raggio" value="50">
+                    
+                    <label for="boltCircleNumHoles" class="block text-sm font-medium text-gray-300 mb-1 mt-2">Numero di Fori</label>
+                    <input type="number" id="boltCircleNumHoles" min="1" value="6" placeholder="Numero fori">
+                    
+                    <label for="boltCircleStartAngle" class="block text-sm font-medium text-gray-300 mb-1 mt-2">Angolo di Partenza (°)</label>
+                    <input type="number" id="boltCircleStartAngle" value="0" placeholder="Angolo in gradi">
+                     <button id="calculateBoltCircleButton" class="w-full mt-4 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-3 rounded-lg text-sm"><i class="fas fa-calculator mr-1"></i>Calcola e Mostra</button>
+                </div>
+                <!-- Colonna Anteprima & Tabella -->
+                <div class="lg:col-span-2 flex flex-col gap-4">
+                    <div class="flex items-center justify-between">
+                         <h4 class="text-md font-semibold text-gray-200">Anteprima e Risultati</h4>
+                         <button id="copyBoltCircleTableButton" title="Copia Tabella Risultati" class="bg-gray-600 hover:bg-gray-500 text-white font-semibold py-1 px-3 rounded-md text-xs transition disabled:opacity-50 disabled:cursor-not-allowed"><i class="fas fa-copy"></i> Copia</button>
+                    </div>
+                    <div class="flex gap-4">
+                        <div class="flex-shrink-0">
+                             <canvas id="boltCirclePreviewCanvas" width="150" height="150"></canvas>
+                        </div>
+                        <div class="flex-grow bolt-circle-results-container">
+                             <table class="min-w-full">
+                                <thead class="bg-gray-650 sticky top-0 z-10">
+                                    <tr>
+                                        <th class="p-2 text-left text-xs font-medium text-gray-300">#</th>
+                                        <th class="p-2 text-right text-xs font-medium text-gray-300">X (img px)</th>
+                                        <th class="p-2 text-right text-xs font-medium text-gray-300">Y (img px)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="boltCircleResultsTableBody" class="bg-gray-700 divide-y divide-gray-600">
+                                     <!-- righe inserite da JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                     <div id="copy-bc-message" class="text-green-400 text-center text-sm h-4 transition-opacity opacity-0">Tabella copiata!</div>
+                </div>
+            </div>
+            <div class="flex justify-end gap-3 mt-6">
+                <button id="generateBoltCircleButton" class="bg-pink-600 hover:bg-pink-700 text-white font-semibold py-2 px-4 rounded-lg text-sm transition duration-150 disabled:opacity-50 disabled:cursor-not-allowed"><i class="fas fa-plus-circle mr-1"></i>Aggiungi Punti al Disegno</button>
+                <button id="cancelBoltCircleButton" class="bg-gray-500 hover:bg-gray-600 text-gray-100 font-semibold py-2 px-4 rounded-lg text-sm transition duration-150">Annulla</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        // App Posizionamento Bollini & Dati (v7.4 - Calcolo Fori con Tabella)
+        const imageUpload = document.getElementById('imageUpload');
+        const csvUpload = document.getElementById('csvUpload');
+        const gcodeUpload = document.getElementById('gcodeUpload');
+        const drawingImage = document.getElementById('drawingImage'); 
+        const drawingArea = document.getElementById('drawingArea');
+        const drawingCanvas = document.getElementById('drawingCanvas');
+        const loupeCanvas = document.getElementById('loupeCanvas'); 
+        const loupeCtx = loupeCanvas.getContext('2d'); 
+        const dimensionsTableBody = document.getElementById('dimensionsTableBody');
+        const tableContainer = document.querySelector('#csvQuotesSection .table-container'); 
+        const tablePlaceholder = document.getElementById('tablePlaceholder');
+        const imageUploadError = document.getElementById('imageUploadError');
+        const csvUploadError = document.getElementById('csvUploadError');
+        const gcodeUploadError = document.getElementById('gcodeUploadError');
+        const imageError = document.getElementById('imageError');
+        const clearBolliniButton = document.getElementById('clearBolliniButton');
+        const exportButton = document.getElementById('exportButton'); 
+        const exportDataButton = document.getElementById('exportDataButton'); 
+        const exportCsvQuotesButton = document.getElementById('exportCsvQuotesButton'); 
+        const infoBox = document.getElementById('infoBox');
+        const scaleDisplay = document.getElementById('scaleDisplay');
+        const loader = document.getElementById('loader');
+        const toggleDeleteModeButton = document.getElementById('toggleDeleteModeButton');
+        const toggleFreeAnnotationModeButton = document.getElementById('toggleFreeAnnotationModeButton');
+        const toggleSequentialAnnotationModeButton = document.getElementById('toggleSequentialAnnotationModeButton');
+        const toggleCalibrateScaleModeButton = document.getElementById('toggleCalibrateScaleModeButton');
+        const toggleMeasureDistanceModeButton = document.getElementById('toggleMeasureDistanceModeButton');
+        const toggleSetOriginModeButton = document.getElementById('toggleSetOriginModeButton'); 
+        const toggleGetCoordsModeButton = document.getElementById('toggleGetCoordsModeButton'); 
+        const togglePlaceSnapPointModeButton = document.getElementById('togglePlaceSnapPointModeButton'); 
+        const clearSnapPointsButton = document.getElementById('clearSnapPointsButton'); 
+        const toggleSetCNCOriginModeButton = document.getElementById('toggleSetCNCOriginModeButton');
+        const clearCNCOriginsButton = document.getElementById('clearCNCOriginsButton');
+        const clearGCodePointsButton = document.getElementById('clearGCodePointsButton');
+        const openBoltCircleCalculatorButton = document.getElementById('openBoltCircleCalculatorButton');
+        const clearBoltCirclePointsButton = document.getElementById('clearBoltCirclePointsButton');
+        
+        const toggleDefineToolPathModeButton = document.getElementById('toggleDefineToolPathModeButton');
+        const toolPathReferenceOriginSelect = document.getElementById('toolPathReferenceOriginSelect');
+        const virtualToolDiameterInput = document.getElementById('virtualToolDiameterInput');
+        const manualToolPathXInput = document.getElementById('manualToolPathXInput');
+        const manualToolPathYInput = document.getElementById('manualToolPathYInput');
+        const addManualToolPathPointButton = document.getElementById('addManualToolPathPointButton');
+        const showToolPathLinesCheckbox = document.getElementById('showToolPathLinesCheckbox');
+        const clearToolPathButton = document.getElementById('clearToolPathButton');
+        const toolPathTableBody = document.getElementById('toolPathTableBody');
+        const toolPathTablePlaceholder = document.getElementById('toolPathTablePlaceholder');
+        const toolPathTableContainer = document.querySelector('.toolpath-table-container');
+
+
+        const zoomInButton = document.getElementById('zoomInButton');
+        const zoomOutButton = document.getElementById('zoomOutButton');
+        const resetZoomButton = document.getElementById('resetZoomButton');
+        const bollinoSizeIncreaseButton = document.getElementById('bollinoSizeIncreaseButton');
+        const bollinoSizeDecreaseButton = document.getElementById('bollinoSizeDecreaseButton');
+        const bollinoSizeResetButton = document.getElementById('bollinoSizeResetButton');
+
+        const confirmClearModal = document.getElementById('confirmClearModal');
+        const confirmClearModalText = document.getElementById('confirmClearModalText');
+        const confirmClearYes = document.getElementById('confirmClearYes');
+        const confirmClearNo = document.getElementById('confirmClearNo');
+        const labelInputModal = document.getElementById('labelInputModal');
+        const bollinoLabelInput = document.getElementById('bollinoLabelInput');
+        const confirmLabelButton = document.getElementById('confirmLabelButton');
+        const cancelLabelButton = document.getElementById('cancelLabelButton');
+        const sequentialLabelInputModal = document.getElementById('sequentialLabelInputModal');
+        const sequentialPrefixInput = document.getElementById('sequentialPrefixInput');
+        const sequentialStartNumberInput = document.getElementById('sequentialStartNumberInput');
+        const confirmSequentialLabelButton = document.getElementById('confirmSequentialLabelButton');
+        const cancelSequentialLabelButton = document.getElementById('cancelSequentialLabelButton');
+        const calibrateScaleModal = document.getElementById('calibrateScaleModal');
+        const realDimensionInput = document.getElementById('realDimensionInput');
+        const unitInput = document.getElementById('unitInput');
+        const confirmCalibrationButton = document.getElementById('confirmCalibrationButton');
+        const cancelCalibrationButton = document.getElementById('cancelCalibrationButton');
+        const cncOriginNameModal = document.getElementById('cncOriginNameModal');
+        const cncOriginNameInput = document.getElementById('cncOriginNameInput');
+        const confirmCNCOriginNameButton = document.getElementById('confirmCNCOriginNameButton');
+        const cancelCNCOriginNameButton = document.getElementById('cancelCNCOriginNameButton');
+        const openAiChatButton = document.getElementById('openAiChatButton');
+        const aiChatModal = document.getElementById('aiChatModal');
+        const aiChatDisplay = document.getElementById('aiChatDisplay');
+        const aiChatPromptInput = document.getElementById('aiChatPromptInput');
+        const sendAiPromptButton = document.getElementById('sendAiPromptButton');
+        const closeAiChatButton = document.getElementById('closeAiChatButton');
+        const aiChatLoader = document.getElementById('aiChatLoader');
+        const attachAiFileButton = document.getElementById('attachAiFileButton');
+        const aiChatFileInput = document.getElementById('aiChatFileInput');
+        const aiChatImagePreviewContainer = document.getElementById('aiChatImagePreviewContainer');
+        const aiChatImagePreview = document.getElementById('aiChatImagePreview');
+        const removeAiChatImageButton = document.getElementById('removeAiChatImageButton');
+
+        const customDataTableContainer = document.querySelector('#customDataSection .custom-table-container');
+        const customDataTableBody = document.getElementById('customDataTableBody');
+        const customTablePlaceholder = document.getElementById('customTablePlaceholder');
+        const addCustomTableRowButton = document.getElementById('addCustomTableRowButton');
+        const exportCustomTableButton = document.getElementById('exportCustomTableButton');
+        const clearCustomTableButton = document.getElementById('clearCustomTableButton');
+        
+        // Elementi DOM per Bolt Circle Calculator
+        const boltCircleModal = document.getElementById('boltCircleModal');
+        const boltCircleCenterX = document.getElementById('boltCircleCenterX');
+        const boltCircleCenterY = document.getElementById('boltCircleCenterY');
+        const pickBoltCircleCenterButton = document.getElementById('pickBoltCircleCenterButton');
+        const boltCircleRadius = document.getElementById('boltCircleRadius');
+        const radiusUnitLabel = document.getElementById('radiusUnitLabel');
+        const boltCircleNumHoles = document.getElementById('boltCircleNumHoles');
+        const boltCircleStartAngle = document.getElementById('boltCircleStartAngle');
+        const calculateBoltCircleButton = document.getElementById('calculateBoltCircleButton');
+        const boltCirclePreviewCanvas = document.getElementById('boltCirclePreviewCanvas');
+        const boltCircleResultsTableBody = document.getElementById('boltCircleResultsTableBody');
+        const copyBoltCircleTableButton = document.getElementById('copyBoltCircleTableButton');
+        const copyBcMessage = document.getElementById('copy-bc-message');
+        const generateBoltCircleButton = document.getElementById('generateBoltCircleButton');
+        const cancelBoltCircleButton = document.getElementById('cancelBoltCircleButton');
+        const boltCirclePreviewCtx = boltCirclePreviewCanvas.getContext('2d');
+        let lastCalculatedBcPoints = [];
+
+
+        // Elementi DOM per ChatGPT Esterno
+        const openExternalChatGPTButton = document.getElementById('openExternalChatGPTButton');
+        const CHATGPT_SHARED_LINK = "https://chatgpt.com/share/6841df5f-19e0-800b-95a1-88090ac8fd3f";
+
+        const ctx = drawingCanvas.getContext('2d');
+        let dimensionData = []; 
+        let selectedDimension = null;
+        let placedBollini = []; 
+        let placedSnapPoints = []; 
+        let cncZeroPoints = []; 
+        let gCodePoints = []; 
+        let toolPathPoints = []; 
+        let boltCircleSets = [];
+        let activeToolPathOriginDetails = null; 
+        let virtualToolDiameter = 1; 
+        let showToolPathLines = true; 
+
+        let currentImage = null; 
+        let currentImageFileType = null; 
+        let activeMode = null; 
+        let tempBollinoCoords = { x: 0, y: 0 }; 
+        let tempCNCOriginCoords = { x: 0, y: 0 };
+        let tempToolPathPointCoords = { x: 0, y: 0 }; 
+
+        let sequentialAnnotationCounter = 1;
+        let sequentialAnnotationPrefix = "";
+        let calibrationPoints = []; 
+        let measurementPoints = []; 
+        let worldScaleFactor = null; 
+        let worldScaleUnit = "mm";
+        let temporaryLine = null; 
+        let lastMeasurementText = null;
+        let beingDraggedBollino = null; 
+        let dragStartCoords = { x: 0, y: 0 }; 
+        let currentSnappedPoint = null; 
+        let customOriginPoint = null; 
+        let showLoupe = false; 
+        const LOUPE_SIZE = 150; 
+        const LOUPE_ZOOM_FACTOR = 4;
+
+        const BOLLINO_DEFAULT_RADIUS_IMG_PX = 20;    
+        const MIN_BOLLINO_RADIUS_ON_SCREEN_PX = 12; 
+        const MIN_TEXT_SIZE_ON_SCREEN_PX = 9;       
+        const TEXT_SIZE_TO_ACTUAL_RADIUS_RATIO = 1.0; 
+
+        const POINT_INDICATOR_RADIUS_IMG_PX = 5;    
+        const SNAP_THRESHOLD_SCREEN_PX = 15;        
+        const CALIBRATION_COLOR = '#fde047'; 
+        const MEASUREMENT_COLOR = '#f97316'; 
+        const SNAP_INDICATOR_COLOR = '#38bdf8'; 
+        const CROSSHAIR_COLOR = 'rgba(220, 38, 38, 0.7)'; 
+        const CROSSHAIR_CENTER_MARKER_COLOR_FILL = 'white';
+        const CROSSHAIR_CENTER_MARKER_COLOR_STROKE = 'black';
+        
+        const ORIGIN_MARKER_COLOR_FILL = 'rgba(16, 185, 129, 0.8)'; 
+        const ORIGIN_MARKER_COLOR_STROKE = '#047857';
+        const ORIGIN_MARKER_RADIUS_IMG_PX = 8;
+
+        const CNC_ORIGIN_MARKER_BASE_RADIUS_IMG_PX = 10;
+        const CNC_ORIGIN_TEXT_SIZE_IMG_PX = 12;
+        const GCODE_POINT_G00_COLOR = 'magenta';
+        const GCODE_POINT_DRILL_COLOR = 'cyan';
+        const GCODE_POINT_RADIUS_IMG_PX = 3;
+
+        const MANUAL_SNAP_POINT_COLOR = '#d946ef'; 
+        const MANUAL_SNAP_POINT_RADIUS_IMG_PX = 4;
+
+        const TOOL_PATH_POINT_COLOR = '#06b6d4'; 
+        const TOOL_PATH_LINE_COLOR = '#0891b2';  
+        const VIRTUAL_TOOL_COLOR = 'rgba(6, 182, 212, 0.3)'; 
+
+        const BOLT_CIRCLE_POINT_COLOR = '#db2777';
+        const BOLT_CIRCLE_REF_LINE_COLOR = 'rgba(219, 39, 119, 0.4)';
+        const BOLT_CIRCLE_POINT_RADIUS_IMG_PX = 4;
+
+        let zoomLevel = 1.0;
+        let minZoom = 0.1;
+        let maxZoom = 10.0;
+        let panOffsetX = 0; 
+        let panOffsetY = 0; 
+        let isPanning = false;
+        let lastPanPosition = { x: 0, y: 0 };
+        let currentMouseCanvasPos = { x: 0, y: 0 }; 
+
+        let bollinoScaleFactor = 1.0; 
+        const MIN_BOLLINO_SCALE = 0.5;
+        const MAX_BOLLINO_SCALE = 2.5;
+        const BOLLINO_SCALE_STEP = 0.1;
+
+        let aiChatHistory = [];
+        let currentAiChatImage = { base64: null, mimeType: null, fileName: null };
+        let customTableEntries = []; 
+
+        // --- Funzioni Utilità Generali ---
+        function showInfo(message) { infoBox.textContent = message; infoBox.style.display = 'block'; }
+        function roundToFirstDecimal(num) { return Math.round(num * 10) / 10; } 
+        
+        function updateUIDisplays() {
+            const scaleText = worldScaleFactor ? `Scala: 1 ${worldScaleUnit} ≈ ${roundToFirstDecimal(worldScaleFactor)}px (img)` : 'Scala non calibrata';
+            const zoomText = `Zoom: ${(zoomLevel * 100).toFixed(0)}%`;
+            const bollinoSizeText = `Dim. Bollini: ${(bollinoScaleFactor * 100).toFixed(0)}%`;
+            
+            let originTexts = [];
+            if (customOriginPoint) {
+                const originX = customOriginPoint.x.toFixed(1);
+                const originY = customOriginPoint.y.toFixed(1);
+                originTexts.push(`Origine Disegno (img px): X=${originX}, Y=${originY}`);
+                if (worldScaleFactor && (activeMode === 'getRelativeCoordinates' || activeMode === 'defineToolPath') && currentMouseCanvasPos.x > 0) {
+                    const mouseImgCoords = canvasToImageCoords(currentMouseCanvasPos.x, currentMouseCanvasPos.y);
+                    const relX = (mouseImgCoords.x - customOriginPoint.x) / worldScaleFactor;
+                    const relY = -((mouseImgCoords.y - customOriginPoint.y) / worldScaleFactor); 
+                    originTexts.push(`Mouse rel. Origine Disegno (${worldScaleUnit}): X=${roundToFirstDecimal(relX)}, Y=${roundToFirstDecimal(relY)}`);
+                }
+            } else {
+                originTexts.push("Origine Disegno: Non impostata");
+            }
+
+            if (cncZeroPoints.length > 0 && worldScaleFactor && (activeMode === 'getRelativeCoordinates' || activeMode === 'defineToolPath') && currentMouseCanvasPos.x > 0) {
+                 const mouseImgCoords = canvasToImageCoords(currentMouseCanvasPos.x, currentMouseCanvasPos.y);
+                 cncZeroPoints.forEach(cncOrigin => {
+                    const relX = (mouseImgCoords.x - cncOrigin.x) / worldScaleFactor;
+                    const relY = -((mouseImgCoords.y - cncOrigin.y) / worldScaleFactor); 
+                    originTexts.push(`Mouse rel. ${cncOrigin.name} (${worldScaleUnit}): X=${roundToFirstDecimal(relX)}, Y=${roundToFirstDecimal(relY)}`);
+                 });
+            } else if (cncZeroPoints.length > 0 && activeMode !== 'getRelativeCoordinates' && activeMode !== 'defineToolPath') {
+                 originTexts.push(`${cncZeroPoints.length} Origine/i CNC definite.`);
+            }
+
+            scaleDisplay.innerHTML = `${scaleText} | ${zoomText} | ${bollinoSizeText} <br> ${originTexts.join('<br>')}`; 
+            scaleDisplay.style.display = 'block';
+            zoomInButton.disabled = zoomLevel >= maxZoom;
+            zoomOutButton.disabled = zoomLevel <= minZoom;
+            bollinoSizeIncreaseButton.disabled = bollinoScaleFactor >= MAX_BOLLINO_SCALE;
+            bollinoSizeDecreaseButton.disabled = bollinoScaleFactor <= MIN_BOLLINO_SCALE;
+        }
+
+        function canvasToImageCoords(canvasX, canvasY) { return { x: (canvasX - panOffsetX) / zoomLevel, y: (canvasY - panOffsetY) / zoomLevel }; }
+        function imageToCanvasCoords(imageX, imageY) { return { x: (imageX * zoomLevel) + panOffsetX, y: (imageY * zoomLevel) + panOffsetY }; }
+        function getOrthogonalPointImg(startPointImg, currentPointImg) { 
+            const dx = Math.abs(currentPointImg.x - startPointImg.x); 
+            const dy = Math.abs(currentPointImg.y - startPointImg.y);
+            return dx > dy ? { x: currentPointImg.x, y: startPointImg.y } : { x: startPointImg.x, y: currentPointImg.y };
+        }
+        function updateCanvasCursor() {
+            drawingCanvas.classList.remove('crosshair-mode-active', 'set-origin-mode-active', 'set-cnc-zero-mode-active', 'get-coords-mode-active', 'place-snap-point-mode-active', 'define-tool-path-mode-active', 'pick-bolt-circle-center-mode-active', 'cell-cursor', 'delete-mode', 'draggable-bollino-hover', 'dragging-bollino', 'over-bollino', 'panning-cursor', 'panning-active-cursor');
+            if (isPanning) { drawingCanvas.classList.add('panning-active-cursor'); return; }
+            if (beingDraggedBollino) { drawingCanvas.classList.add('dragging-bollino'); return; }
+            if (activeMode) {
+                switch (activeMode) {
+                    case 'delete': drawingCanvas.classList.add('delete-mode'); break;
+                    case 'freeAnnotation': case 'sequentialAnnotation': drawingCanvas.classList.add('cell-cursor'); break;
+                    case 'calibrateScale': case 'measureDistance': drawingCanvas.classList.add('crosshair-mode-active'); break;
+                    case 'setOrigin': drawingCanvas.classList.add('set-origin-mode-active'); break; 
+                    case 'setCNCZeroMode': drawingCanvas.classList.add('set-cnc-zero-mode-active'); break; 
+                    case 'getRelativeCoordinates': drawingCanvas.classList.add('get-coords-mode-active'); break; 
+                    case 'placeSnapPoint': drawingCanvas.classList.add('place-snap-point-mode-active'); break; 
+                    case 'defineToolPath': drawingCanvas.classList.add('define-tool-path-mode-active'); break; 
+                    case 'pickBoltCircleCenter': drawingCanvas.classList.add('pick-bolt-circle-center-mode-active'); break;
+                    default: drawingCanvas.style.cursor = 'default';
+                }
+            } else { drawingCanvas.classList.add('panning-cursor'); }
+        }
+        function setActiveMode(modeName) {
+            beingDraggedBollino = null; currentSnappedPoint = null; calibrationPoints = []; measurementPoints = []; temporaryLine = null; lastMeasurementText = null; isPanning = false;
+            const oldActiveMode = activeMode; activeMode = null; 
+            document.querySelectorAll('.button-group button').forEach(btn => btn.classList.remove('active-mode-btn'));
+            
+            toggleDeleteModeButton.innerHTML = '<i class="fas fa-eraser mr-1"></i>Cancella Boll.';
+            toggleFreeAnnotationModeButton.innerHTML = '<i class="fas fa-paint-brush mr-1"></i>Pall. Libera';
+            toggleSequentialAnnotationModeButton.innerHTML = '<i class="fas fa-list-ol mr-1"></i>Pall. Seq.';
+            toggleCalibrateScaleModeButton.innerHTML = '<i class="fas fa-ruler-combined mr-1"></i>Calibra Scala';
+            toggleMeasureDistanceModeButton.innerHTML = '<i class="fas fa-drafting-compass mr-1"></i>Misura Dist.';
+            toggleSetOriginModeButton.innerHTML = '<i class="fas fa-crosshairs mr-1"></i>Imposta Origine Disegno'; 
+            toggleSetCNCOriginModeButton.innerHTML = '<i class="fas fa-map-pin mr-1"></i>Imposta Origine CNC';
+            toggleGetCoordsModeButton.innerHTML = '<i class="fas fa-map-marker-alt mr-1"></i>Leggi Coord.'; 
+            togglePlaceSnapPointModeButton.innerHTML = '<i class="fas fa-thumbtack mr-1"></i>Piazza P.to Snap';
+            toggleDefineToolPathModeButton.innerHTML = '<i class="fas fa-route mr-1"></i>Modalità Percorso Fresa'; 
+            pickBoltCircleCenterButton.classList.remove('active-mode-btn');
+
+
+            if (modeName && modeName === oldActiveMode) { modeName = null; } 
+            if (modeName) {
+                activeMode = modeName;
+                let buttonToActivate, newTextContent, infoMsg;
+                switch (modeName) {
+                    case 'delete': [buttonToActivate, newTextContent, infoMsg] = [toggleDeleteModeButton, '<i class="fas fa-eraser mr-1"></i>Cancella (ON)', 'MODALITÀ CANCELLA: Clicca su un bollino per rimuoverlo.']; break;
+                    case 'freeAnnotation': [buttonToActivate, newTextContent, infoMsg] = [toggleFreeAnnotationModeButton, '<i class="fas fa-paint-brush mr-1"></i>Libera (ON)', 'PALLINATURA LIBERA: Clicca sul disegno per posizionare.']; break;
+                    case 'sequentialAnnotation': [buttonToActivate, newTextContent, infoMsg] = [toggleSequentialAnnotationModeButton, '<i class="fas fa-list-ol mr-1"></i>Seq. (ON)', `PALLINATURA SEQUENZIALE: Inizio da ${sequentialAnnotationPrefix}${sequentialAnnotationCounter}. Clicca per posizionare.`]; break;
+                    case 'calibrateScale': [buttonToActivate, newTextContent, infoMsg] = [toggleCalibrateScaleModeButton, '<i class="fas fa-ruler-combined mr-1"></i>Calibra (ON)', 'CALIBRA SCALA: Clicca due punti. Tieni ALT per Loupe.']; break;
+                    case 'measureDistance':
+                        if (!worldScaleFactor) { showInfo('ERRORE: La scala non è calibrata. Calibra prima di misurare.'); activeMode = null; updateCanvasCursor(); redrawCanvas(); return; }
+                        [buttonToActivate, newTextContent, infoMsg] = [toggleMeasureDistanceModeButton, '<i class="fas fa-drafting-compass mr-1"></i>Misura (ON)', 'MISURA DISTANZA: Clicca due punti. Tieni ALT per Loupe. Risultati approssimati.']; break;
+                    case 'setOrigin': 
+                        [buttonToActivate, newTextContent, infoMsg] = [toggleSetOriginModeButton, '<i class="fas fa-crosshairs mr-1"></i>Origine Dis. (ON)', 'IMPOSTA ORIGINE DISEGNO: Clicca sul disegno per definire il punto (0,0) principale. Tieni ALT per Loupe.']; break;
+                    case 'setCNCZeroMode': 
+                        [buttonToActivate, newTextContent, infoMsg] = [toggleSetCNCOriginModeButton, '<i class="fas fa-map-pin mr-1"></i>Origine CNC (ON)', 'IMPOSTA ORIGINE CNC: Clicca sul disegno, poi inserisci un nome (es. G54). Tieni ALT per Loupe.']; break;
+                    case 'getRelativeCoordinates': 
+                        if (!customOriginPoint && cncZeroPoints.length === 0) { showInfo('ERRORE: Nessuna origine (disegno o CNC) impostata. Definiscine una prima.'); activeMode = null; updateCanvasCursor(); redrawCanvas(); return; }
+                        if (!worldScaleFactor) { showInfo('ERRORE: Scala non calibrata. Calibra prima di leggere coordinate reali.'); activeMode = null; updateCanvasCursor(); redrawCanvas(); return; }
+                        [buttonToActivate, newTextContent, infoMsg] = [toggleGetCoordsModeButton, '<i class="fas fa-map-marker-alt mr-1"></i>Coord. (ON)', 'LEGGI COORDINATE: Muovi il mouse. Tieni ALT per Loupe. Risultati in basso a destra.']; break;
+                    case 'placeSnapPoint': 
+                        [buttonToActivate, newTextContent, infoMsg] = [togglePlaceSnapPointModeButton, '<i class="fas fa-thumbtack mr-1"></i>P.to Snap (ON)', 'PIAZZA PUNTI SNAP: Clicca sul disegno. Tieni premuto ALT per attivare la Loupe di precisione.']; break;
+                    case 'defineToolPath': 
+                        populateToolPathOriginSelect(); 
+                        if (!activeToolPathOriginDetails) {
+                             showInfo('PERCORSO FRESA: Seleziona un\'Origine Riferimento dal menu a tendina prima di aggiungere punti.');
+                        } else {
+                             showInfo(`PERCORSO FRESA (ON): Riferimento '${activeToolPathOriginDetails.name}'. Clicca per aggiungere punti o inserisci manualmente. ALT per Loupe.`);
+                        }
+                        [buttonToActivate, newTextContent] = [toggleDefineToolPathModeButton, '<i class="fas fa-route mr-1"></i>Percorso Fresa (ON)'];
+                        break;
+                    case 'pickBoltCircleCenter':
+                        [buttonToActivate, newTextContent, infoMsg] = [pickBoltCircleCenterButton, '<i class="fas fa-crosshairs"></i> Attivo...', 'SELEZIONA CENTRO: Clicca sul disegno per definire il centro della circonferenza. Tieni ALT per Loupe.']; break;
+                }
+                if (buttonToActivate) { buttonToActivate.classList.add('active-mode-btn'); if(newTextContent) buttonToActivate.innerHTML = newTextContent; if(infoMsg) showInfo(infoMsg); }
+            } else { showInfo('Nessuna modalità attiva. Zooma/Trascina o seleziona un\'azione. Sposta bollini esistenti.'); }
+            updateCanvasCursor(); redrawCanvas(); updateUIDisplays();
+        }
+
+        function updateDimensionDataEntry(index, field, value) {
+            if (dimensionData[index]) {
+                dimensionData[index][field] = value.trim();
+            }
+        }
+
+        function populateTable() { 
+            dimensionsTableBody.innerHTML = '';
+            if (dimensionData.length === 0) { tablePlaceholder.style.display = 'block'; tableContainer.style.display = 'none'; exportCsvQuotesButton.style.display = 'none'; return; }
+            tablePlaceholder.style.display = 'none'; tableContainer.style.display = 'block'; exportCsvQuotesButton.style.display = 'block';
+            
+            dimensionData.forEach((dim, index) => {
+                const row = dimensionsTableBody.insertRow(); 
+                row.classList.add('cursor-pointer', 'hover:bg-gray-600');
+                row.dataset.index = index; 
+
+                const cellLetter = row.insertCell(); 
+                cellLetter.textContent = dim.Lettera || 'N/D'; 
+                cellLetter.className = 'px-2 py-1.5 text-xs text-gray-300';
+                
+                const cellText = row.insertCell(); 
+                cellText.textContent = dim['Testo completo rilevato'] || 'N/D'; 
+                cellText.className = 'px-2 py-1.5 text-xs text-gray-300 truncate max-w-[100px] sm:max-w-xs'; 
+                
+                const cellTolleranza = row.insertCell();
+                cellTolleranza.textContent = dim.tolleranza || '';
+                cellTolleranza.className = 'px-2 py-1.5 text-xs text-gray-300';
+                cellTolleranza.contentEditable = "true";
+                cellTolleranza.addEventListener('blur', (e) => updateDimensionDataEntry(index, 'tolleranza', e.target.textContent));
+
+                const cellMisurato = row.insertCell();
+                cellMisurato.textContent = dim.misurato || '';
+                cellMisurato.className = 'px-2 py-1.5 text-xs text-gray-300';
+                cellMisurato.contentEditable = "true";
+                cellMisurato.addEventListener('blur', (e) => updateDimensionDataEntry(index, 'misurato', e.target.textContent));
+
+                row.addEventListener('click', (event) => {
+                    if (event.target.isContentEditable) return;
+                    if (activeMode && activeMode !== null && activeMode !== 'freeAnnotation' && activeMode !== 'sequentialAnnotation') { 
+                        showInfo(`Modalità '${activeMode}' attiva. Disattivala per selezionare dalla tabella.`); return; 
+                    }
+                    if (beingDraggedBollino || isPanning) return; 
+                    setActiveMode(null); 
+                    selectedDimension = dimensionData[index]; 
+                    document.querySelectorAll('#dimensionsTableBody tr').forEach(r => r.classList.remove('selected-row'));
+                    row.classList.add('selected-row'); 
+                    showInfo(`Quota selezionata: ${selectedDimension.Lettera}. Clicca sul disegno per posizionare il bollino.`);
+                });
+            });
+        }
+        
+        function setupCanvasLayout() { 
+            if (!drawingArea || !drawingCanvas) return;
+            const areaWidth = drawingArea.clientWidth; const areaHeight = drawingArea.clientHeight;
+            drawingCanvas.width = areaWidth; drawingCanvas.height = areaHeight;
+            loupeCanvas.width = LOUPE_SIZE; 
+            loupeCanvas.height = LOUPE_SIZE; 
+            if (!currentImage || !currentImage.complete || currentImage.naturalWidth === 0) { 
+                 ctx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+                 ctx.fillStyle = '#374151'; ctx.fillRect(0,0,drawingCanvas.width, drawingCanvas.height);
+                 ctx.fillStyle = '#9ca3af'; ctx.textAlign = 'center';
+                 ctx.font = `${Math.min(18, drawingCanvas.width/25)}px Inter, sans-serif`;
+                 ctx.fillText('Carica un disegno tecnico per iniziare', drawingCanvas.width / 2, drawingCanvas.height / 2);
+            }
+            redrawCanvas();
+        }
+        function resetZoomAndPan() {
+            if (!currentImage || !drawingCanvas || drawingCanvas.width === 0 || drawingCanvas.height === 0) {
+                zoomLevel = 1.0; panOffsetX = 0; panOffsetY = 0; updateUIDisplays(); return;
+            }
+            const canvasAspect = drawingCanvas.width / drawingCanvas.height;
+            const imageAspect = currentImage.naturalWidth / currentImage.naturalHeight;
+            zoomLevel = (imageAspect > canvasAspect) ? (drawingCanvas.width / currentImage.naturalWidth) : (drawingCanvas.height / currentImage.naturalHeight);
+            zoomLevel = Math.min(zoomLevel, maxZoom); zoomLevel = Math.max(zoomLevel, minZoom); 
+            panOffsetX = (drawingCanvas.width - currentImage.naturalWidth * zoomLevel) / 2;
+            panOffsetY = (drawingCanvas.height - currentImage.naturalHeight * zoomLevel) / 2;
+            updateUIDisplays(); redrawCanvas();
+        }
+
+        function drawLoupe() {
+            const loupeModes = ['placeSnapPoint', 'calibrateScale', 'measureDistance', 'setOrigin', 'setCNCZeroMode', 'getRelativeCoordinates', 'defineToolPath', 'pickBoltCircleCenter'];
+            if (!showLoupe || !currentImage || !loupeModes.includes(activeMode)) { 
+                loupeCanvas.style.display = 'none';
+                return;
+            }
+            loupeCanvas.style.display = 'block';
+            const loupeOffsetX = 20; 
+            const loupeOffsetY = 20; 
+            let loupeTop = currentMouseCanvasPos.y + loupeOffsetY;
+            let loupeLeft = currentMouseCanvasPos.x + loupeOffsetX;
+
+            if (loupeLeft + LOUPE_SIZE > drawingArea.clientWidth) {
+                loupeLeft = currentMouseCanvasPos.x - LOUPE_SIZE - loupeOffsetX;
+            }
+            if (loupeTop + LOUPE_SIZE > drawingArea.clientHeight) {
+                loupeTop = currentMouseCanvasPos.y - LOUPE_SIZE - loupeOffsetY;
+            }
+            loupeCanvas.style.top = `${loupeTop}px`;
+            loupeCanvas.style.left = `${loupeLeft}px`;
+
+            loupeCtx.fillStyle = 'white'; 
+            loupeCtx.fillRect(0, 0, LOUPE_SIZE, LOUPE_SIZE);
+
+            const mouseImgCoords = canvasToImageCoords(currentMouseCanvasPos.x, currentMouseCanvasPos.y);
+            
+            const sourceLoupeWidthImg = LOUPE_SIZE / (zoomLevel * LOUPE_ZOOM_FACTOR);
+            const sourceLoupeHeightImg = LOUPE_SIZE / (zoomLevel * LOUPE_ZOOM_FACTOR);
+            const sourceX = mouseImgCoords.x - sourceLoupeWidthImg / 2;
+            const sourceY = mouseImgCoords.y - sourceLoupeHeightImg / 2;
+
+            loupeCtx.imageSmoothingEnabled = false; 
+
+            loupeCtx.drawImage(
+                drawingCanvas, 
+                (sourceX * zoomLevel) + panOffsetX, (sourceY * zoomLevel) + panOffsetY, 
+                sourceLoupeWidthImg * zoomLevel, sourceLoupeHeightImg * zoomLevel,      
+                0, 0,                       
+                LOUPE_SIZE, LOUPE_SIZE
+            );
+
+            const loupeCenterX = LOUPE_SIZE / 2;
+            const loupeCenterY = LOUPE_SIZE / 2;
+
+            loupeCtx.strokeStyle = CROSSHAIR_COLOR;
+            loupeCtx.lineWidth = 1; 
+            loupeCtx.beginPath();
+            loupeCtx.moveTo(loupeCenterX, 0); loupeCtx.lineTo(loupeCenterX, LOUPE_SIZE);
+            loupeCtx.moveTo(0, loupeCenterY); loupeCtx.lineTo(LOUPE_SIZE, loupeCenterY);
+            loupeCtx.stroke();
+
+            const centerMarkerRadiusLoupePx = 2.5; 
+            loupeCtx.beginPath();
+            loupeCtx.arc(loupeCenterX, loupeCenterY, centerMarkerRadiusLoupePx, 0, 2 * Math.PI);
+            loupeCtx.fillStyle = CROSSHAIR_CENTER_MARKER_COLOR_FILL;
+            loupeCtx.fill();
+            loupeCtx.strokeStyle = CROSSHAIR_CENTER_MARKER_COLOR_STROKE;
+            loupeCtx.lineWidth = 0.5;
+            loupeCtx.stroke();
+        }
+
+        function getCNCOriginColor(index) {
+            const colors = ['#FF6347', '#4682B4', '#32CD32', '#FFD700', '#6A5ACD', '#FF4500', '#20B2AA', '#DA70D6'];
+            return colors[index % colors.length];
+        }
+
+        function redrawCanvas() {
+            if (!ctx || !drawingCanvas) return;
+            ctx.fillStyle = '#2d3748'; ctx.fillRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+            if (currentImage && currentImage.complete && currentImage.naturalWidth > 0) {
+                ctx.save();
+                ctx.translate(panOffsetX, panOffsetY); ctx.scale(zoomLevel, zoomLevel);
+
+                if (currentImageFileType === 'image/svg+xml' || currentImageFileType === 'application/pdf') { 
+                    ctx.fillStyle = 'white';
+                    ctx.fillRect(0, 0, currentImage.naturalWidth, currentImage.naturalHeight);
+                }
+                
+                ctx.drawImage(currentImage, 0, 0, currentImage.naturalWidth, currentImage.naturalHeight);
+                
+                if (customOriginPoint) {
+                    const radius = ORIGIN_MARKER_RADIUS_IMG_PX / zoomLevel;
+                    ctx.beginPath(); ctx.arc(customOriginPoint.x, customOriginPoint.y, radius, 0, 2 * Math.PI);
+                    ctx.fillStyle = ORIGIN_MARKER_COLOR_FILL; ctx.fill();
+                    ctx.strokeStyle = ORIGIN_MARKER_COLOR_STROKE; ctx.lineWidth = 1.5 / zoomLevel; ctx.stroke();
+                    ctx.beginPath();
+                    ctx.moveTo(customOriginPoint.x - radius * 0.6, customOriginPoint.y); ctx.lineTo(customOriginPoint.x + radius * 0.6, customOriginPoint.y);
+                    ctx.moveTo(customOriginPoint.x, customOriginPoint.y - radius * 0.6); ctx.lineTo(customOriginPoint.x, customOriginPoint.y + radius * 0.6);
+                    ctx.strokeStyle = 'white'; ctx.lineWidth = 1 / zoomLevel; ctx.stroke();
+                }
+
+                cncZeroPoints.forEach((cncOrigin, index) => {
+                    const radius = CNC_ORIGIN_MARKER_BASE_RADIUS_IMG_PX / zoomLevel;
+                    const color = cncOrigin.color || getCNCOriginColor(index);
+                    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2 / zoomLevel;
+                    ctx.beginPath();
+                    ctx.moveTo(cncOrigin.x - radius, cncOrigin.y); ctx.lineTo(cncOrigin.x + radius, cncOrigin.y);
+                    ctx.moveTo(cncOrigin.x, cncOrigin.y - radius); ctx.lineTo(cncOrigin.x, cncOrigin.y + radius);
+                    ctx.stroke();
+                    ctx.beginPath(); ctx.arc(cncOrigin.x, cncOrigin.y, radius * 0.3, 0, 2 * Math.PI); ctx.fill();
+                    ctx.font = `bold ${CNC_ORIGIN_TEXT_SIZE_IMG_PX / zoomLevel}px Arial`;
+                    ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+                    ctx.fillText(cncOrigin.name, cncOrigin.x + radius * 0.5, cncOrigin.y - radius * 0.5);
+                });
+
+                gCodePoints.forEach(point => {
+                    const radius = GCODE_POINT_RADIUS_IMG_PX / zoomLevel;
+                    ctx.beginPath();
+                    if (point.type === 'G00_END') {
+                        ctx.strokeStyle = GCODE_POINT_G00_COLOR; ctx.fillStyle = GCODE_POINT_G00_COLOR;
+                        ctx.arc(point.x, point.y, radius, 0, 2 * Math.PI); ctx.fill();
+                    } else if (point.type === 'DRILL_CYCLE') {
+                        ctx.strokeStyle = GCODE_POINT_DRILL_COLOR; ctx.lineWidth = 1.5 / zoomLevel;
+                        ctx.moveTo(point.x - radius * 1.5, point.y); ctx.lineTo(point.x + radius * 1.5, point.y);
+                        ctx.moveTo(point.x, point.y - radius * 1.5); ctx.lineTo(point.x, point.y + radius * 1.5);
+                        ctx.stroke();
+                    }
+                });
+
+                boltCircleSets.forEach(set => {
+                    let radiusPx = set.radius;
+                    if (worldScaleFactor && set.unit !== 'px') {
+                        radiusPx = set.radius * worldScaleFactor;
+                    }
+                    ctx.beginPath();
+                    ctx.arc(set.centerX, set.centerY, radiusPx, 0, 2 * Math.PI);
+                    ctx.strokeStyle = BOLT_CIRCLE_REF_LINE_COLOR;
+                    ctx.lineWidth = 1 / zoomLevel;
+                    ctx.setLineDash([4 / zoomLevel, 4 / zoomLevel]);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+
+                    set.points.forEach(p => {
+                        const radius = BOLT_CIRCLE_POINT_RADIUS_IMG_PX / zoomLevel;
+                        ctx.beginPath();
+                        ctx.arc(p.x, p.y, radius, 0, 2 * Math.PI);
+                        ctx.fillStyle = BOLT_CIRCLE_POINT_COLOR;
+                        ctx.fill();
+                    });
+                });
+
+                // Draw Tool Path Points and Lines
+                if (toolPathPoints.length > 0) {
+                    if (showToolPathLines && toolPathPoints.length > 1) {
+                        ctx.beginPath();
+                        ctx.moveTo(toolPathPoints[0].imgX, toolPathPoints[0].imgY);
+                        for (let i = 1; i < toolPathPoints.length; i++) {
+                            ctx.lineTo(toolPathPoints[i].imgX, toolPathPoints[i].imgY);
+                        }
+                        ctx.strokeStyle = TOOL_PATH_LINE_COLOR;
+                        ctx.lineWidth = 1.5 / zoomLevel; 
+                        ctx.stroke();
+                    }
+                    toolPathPoints.forEach(point => {
+                        let toolRadiusImgPx;
+                        if (worldScaleFactor && virtualToolDiameter > 0) { toolRadiusImgPx = (virtualToolDiameter / 2) * worldScaleFactor; } 
+                        else if (virtualToolDiameter > 0) { toolRadiusImgPx = virtualToolDiameter / 2; }
+                        else { toolRadiusImgPx = 0; }
+                        if (toolRadiusImgPx > 0) { ctx.beginPath(); ctx.arc(point.imgX, point.imgY, toolRadiusImgPx, 0, 2 * Math.PI); ctx.fillStyle = VIRTUAL_TOOL_COLOR; ctx.fill(); }
+                        const centerDotRadius = (POINT_INDICATOR_RADIUS_IMG_PX * 0.5) / zoomLevel;
+                        ctx.beginPath(); ctx.arc(point.imgX, point.imgY, centerDotRadius, 0, 2 * Math.PI); ctx.fillStyle = TOOL_PATH_POINT_COLOR; ctx.fill();
+                    });
+                }
+
+
+                placedSnapPoints.forEach(p => {
+                    const radius = MANUAL_SNAP_POINT_RADIUS_IMG_PX / zoomLevel;
+                    ctx.strokeStyle = MANUAL_SNAP_POINT_COLOR; ctx.lineWidth = 1.5 / zoomLevel; ctx.beginPath();
+                    ctx.moveTo(p.x - radius, p.y); ctx.lineTo(p.x + radius, p.y);
+                    ctx.moveTo(p.x, p.y - radius); ctx.lineTo(p.x, p.y + radius); ctx.stroke();
+                });
+                
+                placedBollini.forEach(bollino => {
+                    const scaledDefaultBollinoRadiusImgPx = BOLLINO_DEFAULT_RADIUS_IMG_PX * bollinoScaleFactor;
+                    const defaultBollinoRadiusOnScreen = scaledDefaultBollinoRadiusImgPx * zoomLevel;
+                    const actualBollinoRadiusOnScreen = Math.max(defaultBollinoRadiusOnScreen, MIN_BOLLINO_RADIUS_ON_SCREEN_PX);
+                    const drawCircleRadiusImgPx = actualBollinoRadiusOnScreen / zoomLevel;
+                    let textFontSizeOnScreen = actualBollinoRadiusOnScreen * TEXT_SIZE_TO_ACTUAL_RADIUS_RATIO;
+                    textFontSizeOnScreen = Math.max(textFontSizeOnScreen, MIN_TEXT_SIZE_ON_SCREEN_PX);
+                    const drawTextFontSizeImgPx = textFontSizeOnScreen / zoomLevel;
+                    drawBollinoOnContext(ctx, bollino.letter, bollino.x, bollino.y, false, drawCircleRadiusImgPx, drawTextFontSizeImgPx);
+                });
+                if (currentSnappedPoint) { 
+                    ctx.beginPath(); ctx.arc(currentSnappedPoint.x, currentSnappedPoint.y, (SNAP_THRESHOLD_SCREEN_PX / 1.5) / zoomLevel, 0, 2 * Math.PI);
+                    ctx.strokeStyle = SNAP_INDICATOR_COLOR; ctx.lineWidth = 2 / zoomLevel; 
+                    ctx.setLineDash([3 / zoomLevel, 3 / zoomLevel]); ctx.stroke(); ctx.setLineDash([]);
+                }
+                const pointIndicatorRadiusOnScreen = POINT_INDICATOR_RADIUS_IMG_PX * zoomLevel;
+                const actualPointIndicatorRadiusImgPx = pointIndicatorRadiusOnScreen < 2 ? (2 / zoomLevel) : POINT_INDICATOR_RADIUS_IMG_PX;
+                if (activeMode === 'calibrateScale' && calibrationPoints.length === 1) {
+                    ctx.beginPath(); ctx.arc(calibrationPoints[0].x, calibrationPoints[0].y, actualPointIndicatorRadiusImgPx, 0, 2 * Math.PI);
+                    ctx.fillStyle = CALIBRATION_COLOR; ctx.fill();
+                } else if (activeMode === 'measureDistance' && measurementPoints.length === 1) {
+                    ctx.beginPath(); ctx.arc(measurementPoints[0].x, measurementPoints[0].y, actualPointIndicatorRadiusImgPx, 0, 2 * Math.PI);
+                    ctx.fillStyle = MEASUREMENT_COLOR; ctx.fill();
+                }
+                if (temporaryLine && temporaryLine.start && temporaryLine.end) { 
+                    ctx.beginPath(); ctx.moveTo(temporaryLine.start.x, temporaryLine.start.y); ctx.lineTo(temporaryLine.end.x, temporaryLine.end.y);
+                    ctx.strokeStyle = activeMode === 'calibrateScale' ? CALIBRATION_COLOR : MEASUREMENT_COLOR;
+                    ctx.lineWidth = 2 / zoomLevel; ctx.setLineDash([5 / zoomLevel, 5 / zoomLevel]); ctx.stroke(); ctx.setLineDash([]);
+                }
+                if (lastMeasurementText && measurementPoints.length === 2) { 
+                    ctx.beginPath(); ctx.moveTo(measurementPoints[0].x, measurementPoints[0].y); ctx.lineTo(measurementPoints[1].x, measurementPoints[1].y);
+                    ctx.strokeStyle = MEASUREMENT_COLOR; ctx.lineWidth = 1.5 / zoomLevel; ctx.stroke();
+                    ctx.font = `bold ${12 / zoomLevel}px Arial`; ctx.fillStyle = MEASUREMENT_COLOR; ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+                    const midX = (measurementPoints[0].x + measurementPoints[1].x) / 2; const midY = (measurementPoints[0].y + measurementPoints[1].y) / 2;
+                    ctx.fillText(lastMeasurementText, midX, midY - (5 / zoomLevel));
+                }
+                
+                const crosshairClasses = ['crosshair-mode-active', 'set-origin-mode-active', 'set-cnc-zero-mode-active', 'get-coords-mode-active', 'place-snap-point-mode-active', 'define-tool-path-mode-active', 'pick-bolt-circle-center-mode-active'];
+                const hasCrosshairClass = crosshairClasses.some(c => drawingCanvas.classList.contains(c));
+
+                if (hasCrosshairClass) {
+                    let centerImgCoords;
+                    if (currentSnappedPoint && 
+                       (activeMode !== 'getRelativeCoordinates' || (activeMode === 'getRelativeCoordinates' && !showLoupe)) // Snap logic
+                      ) {
+                        centerImgCoords = { x: currentSnappedPoint.x, y: currentSnappedPoint.y };
+                    } else {
+                        centerImgCoords = canvasToImageCoords(currentMouseCanvasPos.x, currentMouseCanvasPos.y);
+                    }
+
+                    if (activeMode === 'defineToolPath' && virtualToolDiameter > 0 && activeToolPathOriginDetails) {
+                        let toolRadiusImgPx;
+                        if (worldScaleFactor) { toolRadiusImgPx = (virtualToolDiameter / 2) * worldScaleFactor; }
+                        else { toolRadiusImgPx = virtualToolDiameter / 2; }
+                        ctx.beginPath(); ctx.arc(centerImgCoords.x, centerImgCoords.y, toolRadiusImgPx, 0, 2 * Math.PI);
+                        ctx.fillStyle = VIRTUAL_TOOL_COLOR; ctx.fill();
+                    }
+                    
+                    if (!(showLoupe && currentMouseCanvasPos.x > 0 && currentMouseCanvasPos.x < drawingCanvas.width && currentMouseCanvasPos.y > 0 && currentMouseCanvasPos.y < drawingCanvas.height)) {
+                        ctx.strokeStyle = CROSSHAIR_COLOR; 
+                        ctx.lineWidth = 1 / zoomLevel; 
+                        ctx.beginPath(); 
+                        ctx.moveTo(centerImgCoords.x, 0); ctx.lineTo(centerImgCoords.x, currentImage.naturalHeight);
+                        ctx.moveTo(0, centerImgCoords.y); ctx.lineTo(currentImage.naturalWidth, centerImgCoords.y); 
+                        ctx.stroke();
+
+                        const centerMarkerRadiusImgPx = 2.5 / zoomLevel; 
+                        ctx.beginPath(); ctx.arc(centerImgCoords.x, centerImgCoords.y, centerMarkerRadiusImgPx, 0, 2 * Math.PI);
+                        ctx.fillStyle = CROSSHAIR_CENTER_MARKER_COLOR_FILL; ctx.fill();
+                        ctx.strokeStyle = CROSSHAIR_CENTER_MARKER_COLOR_STROKE; ctx.lineWidth = 0.5 / zoomLevel; ctx.stroke();
+                    }
+                }
+                ctx.restore(); 
+            } else {
+                 ctx.fillStyle = '#374151'; ctx.fillRect(0,0,drawingCanvas.width, drawingCanvas.height);
+                 ctx.fillStyle = '#9ca3af'; ctx.textAlign = 'center';
+                 ctx.font = `${Math.min(18, drawingCanvas.width/25)}px Inter, sans-serif`;
+                 ctx.fillText('Carica un disegno tecnico per iniziare', drawingCanvas.width / 2, drawingCanvas.height / 2);
+            }
+            const loupeModes = ['placeSnapPoint', 'calibrateScale', 'measureDistance', 'setOrigin', 'setCNCZeroMode', 'getRelativeCoordinates', 'defineToolPath', 'pickBoltCircleCenter'];
+            if (showLoupe && loupeModes.includes(activeMode)) {
+                drawLoupe();
+            } else {
+                loupeCanvas.style.display = 'none';
+            }
+        }
+        function drawBollinoOnContext(targetCtx, letter, x_img, y_img, isExport = false, radius_img_px, fontSize_img_px) {
+            const fillStyle = isExport ? 'rgb(220, 38, 38)' : 'rgba(220, 38, 38, 0.85)';
+            targetCtx.beginPath(); targetCtx.arc(x_img, y_img, radius_img_px, 0, 2 * Math.PI, false);
+            targetCtx.fillStyle = fillStyle; targetCtx.fill();
+            targetCtx.lineWidth = (isExport ? 1.5 : 1.5 / zoomLevel); targetCtx.strokeStyle = '#7f1d1d'; targetCtx.stroke();
+            targetCtx.font = `bold ${fontSize_img_px}px Arial, sans-serif`; targetCtx.fillStyle = 'white';
+            targetCtx.textAlign = 'center'; targetCtx.textBaseline = 'middle';
+            targetCtx.fillText(letter, x_img, y_img + (fontSize_img_px * 0.05));
+        }
+        function getBollinoAtCanvasPosition(canvasX, canvasY) {
+            const imgCoords = canvasToImageCoords(canvasX, canvasY);
+            const scaledDefaultBollinoRadiusImgPx = BOLLINO_DEFAULT_RADIUS_IMG_PX * bollinoScaleFactor;
+            const defaultBollinoRadiusOnScreen = scaledDefaultBollinoRadiusImgPx * zoomLevel;
+            const actualBollinoRadiusOnScreen = Math.max(defaultBollinoRadiusOnScreen, MIN_BOLLINO_RADIUS_ON_SCREEN_PX);
+            const hitTestRadiusImgPx = actualBollinoRadiusOnScreen / zoomLevel;
+            for (let i = placedBollini.length - 1; i >= 0; i--) {
+                const bollino = placedBollini[i]; 
+                const distance = Math.sqrt(Math.pow(imgCoords.x - bollino.x, 2) + Math.pow(imgCoords.y - bollino.y, 2));
+                if (distance <= hitTestRadiusImgPx) { return { index: i, bollino: bollino }; }
+            }
+            return null;
+        }
+        
+        imageUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0]; 
+            imageUploadError.textContent = ''; 
+            imageError.textContent = '';
+            currentImageFileType = null; 
+
+            if (file) {
+                loader.style.display = 'block';
+                
+                const commonImageLoadError = () => {
+                    imageError.textContent = 'Errore nel caricamento del file.'; 
+                    currentImage = null; currentImageFileType = null; 
+                    worldScaleFactor = null; customOriginPoint = null; placedSnapPoints = []; cncZeroPoints = []; gCodePoints = []; toolPathPoints = []; boltCircleSets = []; setActiveMode(null);
+                    loader.style.display = 'none'; 
+                    setupCanvasLayout(); resetZoomAndPan(); updateUIDisplays(); renderToolPathTable();
+                };
+
+                const resetAppStateAndDraw = () => { 
+                    placedBollini = []; 
+                    placedSnapPoints = []; 
+                    cncZeroPoints = []; 
+                    gCodePoints = []; 
+                    toolPathPoints = []; 
+                    boltCircleSets = [];
+                    activeToolPathOriginDetails = null; 
+                    worldScaleFactor = null; 
+                    customOriginPoint = null; 
+                    setActiveMode(null); 
+                    setupCanvasLayout(); 
+                    resetZoomAndPan();   
+                    loader.style.display = 'none'; 
+                    tablePlaceholder.textContent = 'Carica un file CSV per le quote o usa una modalità di pallinatura.';
+                    updateUIDisplays();
+                    renderToolPathTable(); 
+                    populateToolPathOriginSelect(); 
+                    redrawCanvas(); 
+                };
+                
+                if (file.type === "application/pdf") {
+                    currentImageFileType = file.type;
+                    const reader = new FileReader();
+                    reader.onload = async (e) => {
+                        try {
+                            const pdfData = new Uint8Array(e.target.result);
+                            const pdfDoc = await pdfjsLib.getDocument({data: pdfData}).promise;
+                            const page = await pdfDoc.getPage(1); 
+                            const viewport = page.getViewport({scale: 2.0}); 
+                            
+                            const tempCanvas = document.createElement('canvas');
+                            const tempCtx = tempCanvas.getContext('2d');
+                            tempCanvas.width = viewport.width;
+                            tempCanvas.height = viewport.height;
+
+                            await page.render({canvasContext: tempCtx, viewport: viewport}).promise;
+                            
+                            const img = new Image();
+                            img.onload = () => {
+                                currentImage = img;
+                                showInfo('File PDF (prima pagina) caricato come immagine. Usa ALT per Loupe di precisione.');
+                                resetAppStateAndDraw();
+                            };
+                            img.onerror = commonImageLoadError;
+                            img.src = tempCanvas.toDataURL();
+                            drawingImage.src = img.src; 
+
+                        } catch (pdfError) {
+                            console.error("Errore caricamento PDF:", pdfError);
+                            imageError.textContent = "Errore durante il caricamento del PDF.";
+                            commonImageLoadError();
+                        }
+                    };
+                    reader.readAsArrayBuffer(file);
+
+                } else if (file.type.startsWith('image/') || file.name.toLowerCase().endsWith('.svg')) { 
+                     const dataUrlReader = new FileReader();
+                     dataUrlReader.onload = (e_dataUrl) => {
+                        const img = new Image();
+                        img.onload = () => {
+                            currentImage = img; 
+                            currentImageFileType = file.type; 
+                            if (file.type === "image/svg+xml") {
+                                showInfo('File SVG caricato come immagine. Usa ALT per Loupe di precisione.');
+                            } else {
+                                showInfo('Immagine caricata.');
+                            }
+                            resetAppStateAndDraw();
+                        };
+                        img.onerror = commonImageLoadError;
+                        img.src = e_dataUrl.target.result; 
+                        drawingImage.src = e_dataUrl.target.result; 
+                     };
+                     dataUrlReader.readAsDataURL(file);
+                } else {
+                    imageUploadError.textContent = 'File non valido. Seleziona un\'immagine (PNG, JPG, GIF), SVG o PDF.';
+                    loader.style.display = 'none';
+                    return;
+                }
+            }
+        });
+
+        csvUpload.addEventListener('change', (event) => { 
+            const file = event.target.files[0]; csvUploadError.textContent = '';
+            if (file) {
+                if (!file.name.endsWith('.csv')) { csvUploadError.textContent = 'File non valido. Seleziona un file .csv'; return; }
+                loader.style.display = 'block'; const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const csvText = e.target.result; const lines = csvText.split(/\r\n|\n/);
+                        if (lines.length < 2) throw new Error("CSV non valido o vuoto.");
+                        const headers = lines[0].split(',').map(h => h.trim());
+                        const letterIndex = headers.indexOf('Lettera'); const textIndex = headers.indexOf('Testo completo rilevato');
+                        if (letterIndex === -1 || textIndex === -1) throw new Error("Header CSV mancanti: 'Lettera' e 'Testo completo rilevato' richiesti.");
+                        dimensionData = [];
+                        for (let i = 1; i < lines.length; i++) {
+                            if (lines[i].trim() === '') continue; const data = lines[i].split(',');
+                            dimensionData.push({ 
+                                Lettera: data[letterIndex] ? data[letterIndex].trim() : 'N/D', 
+                                'Testo completo rilevato': data[textIndex] ? data[textIndex].trim() : 'N/D',
+                                tolleranza: '', 
+                                misurato: ''    
+                            });
+                        }
+                        populateTable(); showInfo('File CSV per quote bollini caricato. Tolleranza e Misurato sono editabili.');
+                    } catch (error) { csvUploadError.textContent = `Errore CSV: ${error.message}`; dimensionData = []; populateTable(); showInfo('Errore caricamento CSV quote bollini.'); }
+                    finally { loader.style.display = 'none'; }
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        gcodeUpload.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            gcodeUploadError.textContent = '';
+            if (file) {
+                loader.style.display = 'block';
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const gcodeText = e.target.result;
+                        gCodePoints = parseGCode(gcodeText);
+                        showInfo(`${gCodePoints.length} punti G-Code estratti e visualizzati. Allinea un'origine disegno/CNC se necessario.`);
+                        redrawCanvas();
+                    } catch (error) {
+                        gcodeUploadError.textContent = `Errore nel parsing G-Code: ${error.message}`;
+                        gCodePoints = [];
+                        showInfo('Errore durante il caricamento o parsing del G-Code.');
+                        console.error("G-Code parsing error:", error);
+                    } finally {
+                        loader.style.display = 'none';
+                        gcodeUpload.value = ''; 
+                    }
+                };
+                reader.onerror = () => {
+                    loader.style.display = 'none';
+                    gcodeUploadError.textContent = 'Errore lettura file G-Code.';
+                    showInfo('Errore lettura file G-Code.');
+                };
+                reader.readAsText(file);
+            }
+        });
+
+        function parseGCode(gcodeText) {
+            const lines = gcodeText.split(/\r\n|\n/);
+            const points = [];
+            let currentX = 0, currentY = 0; 
+            const gcodeRegex = /([GXYZF])([+-]?\d*\.?\d+)/gi; 
+
+            lines.forEach(line => {
+                line = line.toUpperCase().split(';')[0].trim(); 
+                if (!line) return;
+
+                const words = {};
+                let match;
+                while ((match = gcodeRegex.exec(line)) !== null) {
+                    words[match[1]] = parseFloat(match[2]);
+                }
+
+                if (words['G'] !== undefined) {
+                    const gCode = Math.floor(words['G']);
+                    let x = words['X'] !== undefined ? words['X'] : currentX;
+                    let y = words['Y'] !== undefined ? words['Y'] : currentY;
+
+                    if (gCode === 0 || gCode === 1) { 
+                        if(words['X'] !== undefined || words['Y'] !== undefined) { 
+                           points.push({ x: x, y: y, type: 'G00_END', rawLine: line });
+                        }
+                        currentX = x;
+                        currentY = y;
+                    } else if (gCode === 81 || gCode === 82 || gCode === 83) { 
+                        if(words['X'] !== undefined || words['Y'] !== undefined) { 
+                           points.push({ x: x, y: y, type: 'DRILL_CYCLE', rawLine: line });
+                        }
+                        currentX = x; 
+                        currentY = y;
+                    }
+                }
+            });
+            return points;
+        }
+
+
+        drawingCanvas.addEventListener('mousedown', (event) => {
+            if (!currentImage || event.button !== 0) return; 
+            const rect = drawingCanvas.getBoundingClientRect();
+            const canvasX = event.clientX - rect.left; const canvasY = event.clientY - rect.top;
+            if (activeMode === null) { 
+                const bollinoData = getBollinoAtCanvasPosition(canvasX, canvasY);
+                if (bollinoData) {
+                    beingDraggedBollino = bollinoData.bollino;
+                    const mouseImgCoords = canvasToImageCoords(canvasX, canvasY);
+                    dragStartCoords = { x: mouseImgCoords.x - beingDraggedBollino.x, y: mouseImgCoords.y - beingDraggedBollino.y }; 
+                    isPanning = false; 
+                } else { isPanning = true; lastPanPosition = { x: canvasX, y: canvasY }; }
+            }
+            updateCanvasCursor();
+        });
+        drawingCanvas.addEventListener('mousemove', (event) => {
+            if (!currentImage) return;
+            const rect = drawingCanvas.getBoundingClientRect();
+            currentMouseCanvasPos = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+            
+            if (isPanning) {
+                const dx = currentMouseCanvasPos.x - lastPanPosition.x; const dy = currentMouseCanvasPos.y - lastPanPosition.y;
+                panOffsetX += dx; panOffsetY += dy;
+                lastPanPosition = { x: currentMouseCanvasPos.x, y: currentMouseCanvasPos.y };
+                 if(activeMode === 'getRelativeCoordinates' || activeMode === 'defineToolPath') updateUIDisplays(); 
+            } else if (beingDraggedBollino) {
+                const mouseImgCoords = canvasToImageCoords(currentMouseCanvasPos.x, currentMouseCanvasPos.y);
+                beingDraggedBollino.x = mouseImgCoords.x - dragStartCoords.x;
+                beingDraggedBollino.y = mouseImgCoords.y - dragStartCoords.y;
+            } else { 
+                currentSnappedPoint = null; 
+                let effectiveImgCoords = canvasToImageCoords(currentMouseCanvasPos.x, currentMouseCanvasPos.y);
+
+                const isSnappingMode = (activeMode === 'calibrateScale' && calibrationPoints.length < 2) || 
+                                     (activeMode === 'measureDistance' && measurementPoints.length < 2 && worldScaleFactor) ||
+                                     activeMode === 'setOrigin' || activeMode === 'setCNCZeroMode' || 
+                                     activeMode === 'getRelativeCoordinates' || activeMode === 'placeSnapPoint' ||
+                                     (activeMode === 'defineToolPath' && activeToolPathOriginDetails) ||
+                                     activeMode === 'pickBoltCircleCenter'; 
+
+                if (isSnappingMode) { 
+                    let closestPointInfo = null; 
+                    let minDistanceSqToMouse = Infinity;
+                    const snapRadiusImgSq = Math.pow(SNAP_THRESHOLD_SCREEN_PX / zoomLevel, 2);
+
+                    const potentialSnapPoints = [
+                        ...placedSnapPoints.map(p => ({ ...p, type: 'manualSnapPoint' })),
+                        ...placedBollini.map(b => ({ x: b.x, y: b.y, type: 'bollino', originalBollino: b })),
+                        ...gCodePoints.map(p => ({...p, type: 'gCodePoint', originalGCodePoint: p })),
+                        ...toolPathPoints.map(p => ({ x: p.imgX, y: p.imgY, type: 'toolPathPoint', originalToolPathPoint: p }))
+                    ];
+                    if (customOriginPoint && activeMode !== 'setOrigin') {
+                         potentialSnapPoints.push({ x: customOriginPoint.x, y: customOriginPoint.y, type: 'origin' });
+                    }
+                    cncZeroPoints.forEach(origin => {
+                        if (activeMode !== 'setCNCZeroMode' || (currentSnappedPoint && currentSnappedPoint.type === 'cncOrigin' && currentSnappedPoint.originalCNCOrigin === origin)) return;
+                        potentialSnapPoints.push({ x: origin.x, y: origin.y, type: 'cncOrigin', originalCNCOrigin: origin });
+                    });
+
+
+                    potentialSnapPoints.forEach(snapPt => {
+                        const dx = effectiveImgCoords.x - snapPt.x; const dy = effectiveImgCoords.y - snapPt.y; const distSq = dx * dx + dy * dy;
+                        if (distSq < snapRadiusImgSq && distSq < minDistanceSqToMouse) { minDistanceSqToMouse = distSq; closestPointInfo = snapPt; }
+                    });
+
+                    if (closestPointInfo) { currentSnappedPoint = closestPointInfo; }
+                }
+                
+                if ((activeMode === 'calibrateScale' && calibrationPoints.length === 1) || 
+                    (activeMode === 'measureDistance' && measurementPoints.length === 1 && worldScaleFactor)) {
+                    
+                    let pointForOrthogonalGuide = currentSnappedPoint ? { x: currentSnappedPoint.x, y: currentSnappedPoint.y } : effectiveImgCoords;
+                    temporaryLine.end = getOrthogonalPointImg(temporaryLine.start, pointForOrthogonalGuide);
+                }
+
+                if (!activeMode) { 
+                    drawingCanvas.classList.toggle('draggable-bollino-hover', getBollinoAtCanvasPosition(currentMouseCanvasPos.x, currentMouseCanvasPos.y) !== null);
+                } else if (activeMode === 'delete') { 
+                    drawingCanvas.classList.toggle('over-bollino', getBollinoAtCanvasPosition(currentMouseCanvasPos.x, currentMouseCanvasPos.y) !== null); 
+                }
+                 if(activeMode === 'getRelativeCoordinates' || activeMode === 'defineToolPath') updateUIDisplays(); 
+            }
+            if (currentMouseCanvasPos.x >= 0 && currentMouseCanvasPos.x <= drawingCanvas.width &&
+                currentMouseCanvasPos.y >= 0 && currentMouseCanvasPos.y <= drawingCanvas.height) {
+                const loupeModes = ['placeSnapPoint', 'calibrateScale', 'measureDistance', 'setOrigin', 'setCNCZeroMode', 'getRelativeCoordinates', 'defineToolPath', 'pickBoltCircleCenter'];
+                if (showLoupe && loupeModes.includes(activeMode)) {
+                    drawLoupe();
+                }
+            } else {
+                loupeCanvas.style.display = 'none'; 
+            }
+            redrawCanvas();
+        });
+        drawingCanvas.addEventListener('mouseup', (event) => {
+            if (event.button !== 0) return;
+            if (isPanning) { isPanning = false; } 
+            else if (beingDraggedBollino) { beingDraggedBollino = null; }
+            updateCanvasCursor(); redrawCanvas(); 
+        });
+        drawingCanvas.addEventListener('mouseleave', () => {
+            if (isPanning) isPanning = false;
+            if (beingDraggedBollino) { beingDraggedBollino = null; }
+            const crosshairModes = ['calibrateScale', 'measureDistance', 'setOrigin', 'setCNCZeroMode', 'getRelativeCoordinates', 'placeSnapPoint', 'defineToolPath', 'pickBoltCircleCenter'];
+            if (crosshairModes.includes(activeMode)) {
+                const crosshairClasses = ['crosshair-mode-active', 'set-origin-mode-active', 'set-cnc-zero-mode-active', 'get-coords-mode-active', 'place-snap-point-mode-active', 'define-tool-path-mode-active', 'pick-bolt-circle-center-mode-active'];
+                drawingCanvas.classList.remove(...crosshairClasses); 
+                redrawCanvas(); 
+                updateCanvasCursor(); 
+            }
+            loupeCanvas.style.display = 'none'; 
+            updateUIDisplays(); 
+        });
+        drawingCanvas.addEventListener('mouseenter', () => { 
+            updateCanvasCursor(); 
+            const crosshairModes = ['calibrateScale', 'measureDistance', 'setOrigin', 'setCNCZeroMode', 'getRelativeCoordinates', 'placeSnapPoint', 'defineToolPath', 'pickBoltCircleCenter'];
+            if (showLoupe && crosshairModes.includes(activeMode)) {
+                loupeCanvas.style.display = 'block';
+            }
+            if (crosshairModes.includes(activeMode)) { 
+                redrawCanvas(); 
+            } 
+        });
+        
+        drawingCanvas.addEventListener('click', (event) => {
+            if (!currentImage || isPanning || beingDraggedBollino) return; 
+            const rect = drawingCanvas.getBoundingClientRect();
+            const canvasX = event.clientX - rect.left; const canvasY = event.clientY - rect.top;
+            
+            let finalImgCoords = canvasToImageCoords(canvasX, canvasY); 
+            
+            if (currentSnappedPoint) {
+                finalImgCoords = { x: currentSnappedPoint.x, y: currentSnappedPoint.y };
+                let snapTypeMsg = "Punto generico";
+                if (currentSnappedPoint.type === 'origin') snapTypeMsg = 'origine disegno';
+                else if (currentSnappedPoint.type === 'cncOrigin') snapTypeMsg = `origine CNC '${currentSnappedPoint.originalCNCOrigin.name}'`;
+                else if (currentSnappedPoint.type === 'bollino') snapTypeMsg = `bollino '${currentSnappedPoint.originalBollino.letter}'`;
+                else if (currentSnappedPoint.type === 'manualSnapPoint') snapTypeMsg = 'punto di snap manuale';
+                else if (currentSnappedPoint.type === 'gCodePoint') snapTypeMsg = `punto G-Code (${currentSnappedPoint.originalGCodePoint.type})`;
+                else if (currentSnappedPoint.type === 'toolPathPoint') snapTypeMsg = `punto percorso fresa #${toolPathPoints.indexOf(currentSnappedPoint.originalToolPathPoint) + 1}`;
+                showInfo(`Punto agganciato a: ${snapTypeMsg}.`);
+            }
+
+            switch (activeMode) {
+                case 'delete':
+                    const bollinoToRemoveData = getBollinoAtCanvasPosition(canvasX, canvasY); 
+                    if (bollinoToRemoveData) { const removed = placedBollini.splice(bollinoToRemoveData.index, 1)[0]; showInfo(`Bollino '${removed.letter}' rimosso.`); } 
+                    else { showInfo("Nessun bollino trovato per la cancellazione."); }
+                    break;
+                case 'freeAnnotation':
+                    tempBollinoCoords = finalImgCoords; bollinoLabelInput.value = '';
+                    labelInputModal.classList.add('active'); bollinoLabelInput.focus();
+                    break;
+                case 'sequentialAnnotation':
+                    const seqLabel = `${sequentialAnnotationPrefix}${sequentialAnnotationCounter}`;
+                    placedBollini.push({ letter: seqLabel, x: finalImgCoords.x, y: finalImgCoords.y, text: `Annotazione sequenziale: ${seqLabel}` });
+                    sequentialAnnotationCounter++; showInfo(`Bollino sequenziale '${seqLabel}' posizionato. Prossimo: ${sequentialAnnotationPrefix}${sequentialAnnotationCounter}`);
+                    if (toggleSequentialAnnotationModeButton.classList.contains('active-mode-btn')) { 
+                        toggleSequentialAnnotationModeButton.innerHTML = '<i class="fas fa-list-ol mr-1"></i>Seq. (ON)';
+                        showInfo(`Pallinatura Sequenziale ATTIVA. Prossimo: ${sequentialAnnotationPrefix}${sequentialAnnotationCounter}. Clicca sul disegno.`);
+                    }
+                    break;
+                case 'calibrateScale':
+                    calibrationPoints.push(finalImgCoords); 
+                    if (calibrationPoints.length === 1) { temporaryLine = { start: finalImgCoords, end: finalImgCoords }; showInfo('Primo punto calibrazione. Seleziona il secondo.'); } 
+                    else if (calibrationPoints.length === 2) {
+                        calibrationPoints[1] = getOrthogonalPointImg(calibrationPoints[0], finalImgCoords); 
+                        if (temporaryLine) temporaryLine.end = calibrationPoints[1]; 
+                        realDimensionInput.value = ''; unitInput.value = worldScaleUnit;
+                        calibrateScaleModal.classList.add('active'); realDimensionInput.focus();
+                        showInfo('Secondo punto selezionato. Inserisci valore reale.');
+                    }
+                    break;
+                case 'measureDistance':
+                    if (!worldScaleFactor) { showInfo('ERRORE: Scala non calibrata.'); return; }
+                    measurementPoints.push(finalImgCoords); 
+                    if (measurementPoints.length === 1) { temporaryLine = { start: finalImgCoords, end: finalImgCoords }; lastMeasurementText = null; showInfo('Primo punto misura. Seleziona il secondo.'); } 
+                    else if (measurementPoints.length === 2) {
+                        measurementPoints[1] = getOrthogonalPointImg(measurementPoints[0], finalImgCoords); 
+                        if (temporaryLine) temporaryLine.end = measurementPoints[1]; 
+                        const dx_img_pixels = Math.abs(measurementPoints[1].x - measurementPoints[0].x); const dy_img_pixels = Math.abs(measurementPoints[1].y - measurementPoints[0].y);
+                        const pixelDistanceImg = Math.sqrt(dx_img_pixels * dx_img_pixels + dy_img_pixels * dy_img_pixels);
+                        const realDistance = pixelDistanceImg / worldScaleFactor;
+                        lastMeasurementText = `${roundToFirstDecimal(realDistance)} ${worldScaleUnit}`; 
+                        showInfo(`Misura: ${lastMeasurementText}. Clicca di nuovo per iniziare una nuova misura.`);
+                        measurementPoints = []; temporaryLine = null;
+                    }
+                    break;
+                case 'setOrigin': 
+                    customOriginPoint = finalImgCoords;
+                    showInfo(`Origine Disegno Principale impostata a X: ${customOriginPoint.x.toFixed(1)}, Y: ${customOriginPoint.y.toFixed(1)} (coord. immagine).`);
+                    populateToolPathOriginSelect(); 
+                    setActiveMode(null); 
+                    break;
+                case 'setCNCZeroMode': 
+                    tempCNCOriginCoords = finalImgCoords;
+                    cncOriginNameInput.value = `G5${4 + cncZeroPoints.length}`; 
+                    cncOriginNameModal.classList.add('active');
+                    cncOriginNameInput.focus();
+                    break;
+                case 'getRelativeCoordinates': 
+                    if (!worldScaleFactor) { showInfo("ERRORE: Scala non calibrata per coordinate reali."); break; }
+                    if (!customOriginPoint && cncZeroPoints.length === 0) { showInfo("ERRORE: Nessuna origine (disegno o CNC) impostata."); break; }
+                    
+                    let coordMessages = ["Coordinate Relative (vedi riquadro in basso a destra):"];
+                    const currentImgCoords = finalImgCoords; 
+
+                    if (customOriginPoint) {
+                         const relX = (currentImgCoords.x - customOriginPoint.x) / worldScaleFactor;
+                         const relY = -((currentImgCoords.y - customOriginPoint.y) / worldScaleFactor); 
+                         coordMessages.push(`Da Origine Disegno (${worldScaleUnit}): X=${roundToFirstDecimal(relX)}, Y=${roundToFirstDecimal(relY)}`);
+                    }
+                    cncZeroPoints.forEach(origin => {
+                        const relX = (currentImgCoords.x - origin.x) / worldScaleFactor;
+                        const relY = -((currentImgCoords.y - origin.y) / worldScaleFactor); 
+                        coordMessages.push(`Da ${origin.name} (${worldScaleUnit}): X=${roundToFirstDecimal(relX)}, Y=${roundToFirstDecimal(relY)}`);
+                    });
+                    showInfo(coordMessages.join('; '));
+                    break;
+                case 'placeSnapPoint': 
+                    placedSnapPoints.push({x: finalImgCoords.x, y: finalImgCoords.y });
+                    showInfo(`Punto di Snap piazzato a X:${finalImgCoords.x.toFixed(1)}, Y:${finalImgCoords.y.toFixed(1)}.`);
+                    break;
+                case 'defineToolPath': 
+                    if (!activeToolPathOriginDetails) {
+                        showInfo("ERRORE: Seleziona un'Origine Riferimento per il percorso fresa prima di aggiungere punti.");
+                        break;
+                    }
+                    const newPathPoint = {
+                        imgX: finalImgCoords.x, imgY: finalImgCoords.y,
+                        refOriginName: activeToolPathOriginDetails.name, refOriginType: activeToolPathOriginDetails.type,
+                        refOriginImgX: activeToolPathOriginDetails.imgX, refOriginImgY: activeToolPathOriginDetails.imgY,
+                    };
+                    if (worldScaleFactor) {
+                        newPathPoint.relX = (finalImgCoords.x - activeToolPathOriginDetails.imgX) / worldScaleFactor;
+                        newPathPoint.relY = -((finalImgCoords.y - activeToolPathOriginDetails.imgY) / worldScaleFactor); 
+                    } else {
+                        newPathPoint.relX = finalImgCoords.x - activeToolPathOriginDetails.imgX;
+                        newPathPoint.relY = -(finalImgCoords.y - activeToolPathOriginDetails.imgY); 
+                    }
+                    toolPathPoints.push(newPathPoint); renderToolPathTable();
+                    showInfo(`Punto #${toolPathPoints.length} aggiunto al percorso fresa. Riferimento: ${activeToolPathOriginDetails.name}.`);
+                    break;
+                case 'pickBoltCircleCenter':
+                    boltCircleCenterX.value = finalImgCoords.x.toFixed(2);
+                    boltCircleCenterY.value = finalImgCoords.y.toFixed(2);
+                    showInfo(`Centro per circonferenza selezionato. Torna alla finestra per completare.`);
+                    setActiveMode(null);
+                    boltCircleModal.classList.add('active'); // Riporta il focus alla modal
+                    handleBoltCircleCalculation(); // Calcola subito con il nuovo centro
+                    break;
+                default: 
+                    if (selectedDimension) { 
+                        placedBollini.push({ 
+                            letter: selectedDimension.Lettera, 
+                            x: finalImgCoords.x, y: finalImgCoords.y, 
+                            text: selectedDimension['Testo completo rilevato'],
+                            tolleranza: selectedDimension.tolleranza || '', 
+                            misurato: selectedDimension.misurato || ''    
+                        });
+                        showInfo(`Bollino '${selectedDimension.Lettera}' posizionato.`);
+                        selectedDimension = null;
+                        document.querySelectorAll('#dimensionsTableBody tr').forEach(r => r.classList.remove('selected-row'));
+                    }
+                    break;
+            }
+            currentSnappedPoint = null; 
+            redrawCanvas();
+            updateUIDisplays();
+        });
+        drawingCanvas.addEventListener('wheel', (event) => {
+            if (!currentImage) return; event.preventDefault();
+            const rect = drawingCanvas.getBoundingClientRect();
+            const mouseCanvasX = event.clientX - rect.left; const mouseCanvasY = event.clientY - rect.top;
+            const mouseImgX_before = (mouseCanvasX - panOffsetX) / zoomLevel; const mouseImgY_before = (mouseCanvasY - panOffsetY) / zoomLevel;
+            const zoomFactor = 1.1;
+            if (event.deltaY < 0) { zoomLevel *= zoomFactor; } else { zoomLevel /= zoomFactor; }
+            zoomLevel = Math.max(minZoom, Math.min(maxZoom, zoomLevel));
+            panOffsetX = mouseCanvasX - mouseImgX_before * zoomLevel; panOffsetY = mouseCanvasY - mouseImgY_before * zoomLevel;
+            updateUIDisplays(); redrawCanvas();
+        });
+
+        document.addEventListener('keydown', (event) => {
+            const crosshairAndLoupeModes = ['placeSnapPoint', 'calibrateScale', 'measureDistance', 'setOrigin', 'setCNCZeroMode', 'getRelativeCoordinates', 'defineToolPath', 'pickBoltCircleCenter'];
+            if (event.key === 'Alt' && crosshairAndLoupeModes.includes(activeMode) ) {
+                event.preventDefault(); 
+                if (!showLoupe) {
+                    showLoupe = true;
+                    loupeCanvas.style.display = 'block';
+                    redrawCanvas(); 
+                }
+            }
+        });
+        document.addEventListener('keyup', (event) => {
+            if (event.key === 'Alt') {
+                if (showLoupe) {
+                    showLoupe = false;
+                    loupeCanvas.style.display = 'none';
+                    redrawCanvas(); 
+                }
+            }
+        });
+
+
+        bollinoSizeIncreaseButton.addEventListener('click', () => { bollinoScaleFactor = Math.min(MAX_BOLLINO_SCALE, bollinoScaleFactor + BOLLINO_SCALE_STEP); updateUIDisplays(); redrawCanvas(); });
+        bollinoSizeDecreaseButton.addEventListener('click', () => { bollinoScaleFactor = Math.max(MIN_BOLLINO_SCALE, bollinoScaleFactor - BOLLINO_SCALE_STEP); updateUIDisplays(); redrawCanvas(); });
+        bollinoSizeResetButton.addEventListener('click', () => { bollinoScaleFactor = 1.0; updateUIDisplays(); redrawCanvas(); });
+
+        confirmLabelButton.addEventListener('click', () => {
+            const label = bollinoLabelInput.value;
+            if (label && label.trim() !== "") {
+                placedBollini.push({ letter: label.trim(), x: tempBollinoCoords.x, y: tempBollinoCoords.y, text: `Annotazione libera: ${label.trim()}` });
+                redrawCanvas(); showInfo(`Bollino libero '${label.trim()}' posizionato.`);
+            } else { showInfo("Etichetta non valida. Bollino non aggiunto."); }
+            labelInputModal.classList.remove('active');
+        });
+        cancelLabelButton.addEventListener('click', () => { labelInputModal.classList.remove('active'); showInfo("Aggiunta bollino libero annullata."); });
+        labelInputModal.addEventListener('click', (e) => { if (e.target === labelInputModal) cancelLabelButton.click(); });
+
+        confirmSequentialLabelButton.addEventListener('click', () => {
+            const prefix = sequentialPrefixInput.value.trim(); const startNum = parseInt(sequentialStartNumberInput.value, 10);
+            if (isNaN(startNum) || startNum < 0) { showInfo("Numero di partenza non valido."); sequentialStartNumberInput.focus(); return; }
+            sequentialAnnotationPrefix = prefix; sequentialAnnotationCounter = startNum; sequentialLabelInputModal.classList.remove('active');
+            setActiveMode('sequentialAnnotation'); 
+        });
+        cancelSequentialLabelButton.addEventListener('click', () => { sequentialLabelInputModal.classList.remove('active'); setActiveMode(null); showInfo("Impostazione pallinatura sequenziale annullata."); });
+        sequentialLabelInputModal.addEventListener('click', (e) => { if (e.target === sequentialLabelInputModal) cancelSequentialLabelButton.click(); });
+
+        confirmCalibrationButton.addEventListener('click', () => {
+            const realDim = parseFloat(realDimensionInput.value); const unit = unitInput.value.trim();
+            if (isNaN(realDim) || realDim <= 0) { showInfo("Valore reale non valido."); realDimensionInput.focus(); return; }
+            if (!unit) { showInfo("Unità di misura non valida."); unitInput.focus(); return; }
+            if (calibrationPoints.length === 2) { 
+                const dx_img_pixels = Math.abs(calibrationPoints[1].x - calibrationPoints[0].x); const dy_img_pixels = Math.abs(calibrationPoints[1].y - calibrationPoints[0].y);
+                const pixelDistanceImg = Math.sqrt(dx_img_pixels*dx_img_pixels + dy_img_pixels*dy_img_pixels);
+                if (pixelDistanceImg > 0) {
+                    worldScaleFactor = pixelDistanceImg / realDim; worldScaleUnit = unit;
+                    showInfo(`Scala calibrata: 1 ${worldScaleUnit} ≈ ${roundToFirstDecimal(worldScaleFactor)} pixel immagine.`);
+                } else { showInfo("Distanza calibrazione nulla. Riprova."); worldScaleFactor = null; }
+            }
+            calibrateScaleModal.classList.remove('active'); calibrationPoints = []; temporaryLine = null;
+            setActiveMode(null); redrawCanvas(); updateUIDisplays();
+        });
+        cancelCalibrationButton.addEventListener('click', () => {
+            calibrateScaleModal.classList.remove('active'); calibrationPoints = []; temporaryLine = null;
+            showInfo("Calibrazione annullata."); setActiveMode(null); redrawCanvas(); updateUIDisplays();
+        });
+        calibrateScaleModal.addEventListener('click', (e) => { if (e.target === calibrateScaleModal) cancelCalibrationButton.click(); });
+
+        confirmCNCOriginNameButton.addEventListener('click', () => {
+            const name = cncOriginNameInput.value.trim();
+            if (!name) {
+                showInfo("Nome Origine CNC non valido. Operazione annullata.");
+                cncOriginNameModal.classList.remove('active');
+                setActiveMode(null);
+                return;
+            }
+            cncZeroPoints.push({ 
+                name: name, 
+                x: tempCNCOriginCoords.x, 
+                y: tempCNCOriginCoords.y,
+                color: getCNCOriginColor(cncZeroPoints.length) 
+            });
+            showInfo(`Origine CNC '${name}' impostata a X:${tempCNCOriginCoords.x.toFixed(1)}, Y:${tempCNCOriginCoords.y.toFixed(1)}.`);
+            populateToolPathOriginSelect(); 
+            cncOriginNameModal.classList.remove('active');
+            setActiveMode(null); 
+            redrawCanvas();
+            updateUIDisplays();
+        });
+        cancelCNCOriginNameButton.addEventListener('click', () => {
+            cncOriginNameModal.classList.remove('active');
+            showInfo("Impostazione Origine CNC annullata.");
+            setActiveMode(null);
+        });
+        cncOriginNameModal.addEventListener('click', (e) => { if (e.target === cncOriginNameModal) cancelCNCOriginNameButton.click(); });
+
+
+        toggleFreeAnnotationModeButton.addEventListener('click', () => setActiveMode('freeAnnotation'));
+        toggleSequentialAnnotationModeButton.addEventListener('click', () => {
+            if (activeMode === 'sequentialAnnotation') setActiveMode(null);
+            else { 
+                sequentialPrefixInput.value = sequentialAnnotationPrefix; sequentialStartNumberInput.value = sequentialAnnotationCounter;
+                sequentialLabelInputModal.classList.add('active'); sequentialPrefixInput.focus();
+            }
+        });
+        toggleDeleteModeButton.addEventListener('click', () => setActiveMode('delete'));
+        toggleCalibrateScaleModeButton.addEventListener('click', () => setActiveMode('calibrateScale'));
+        toggleMeasureDistanceModeButton.addEventListener('click', () => { if (activeMode === 'measureDistance') setActiveMode(null); else setActiveMode('measureDistance'); });
+        toggleSetOriginModeButton.addEventListener('click', () => setActiveMode('setOrigin')); 
+        toggleGetCoordsModeButton.addEventListener('click', () => setActiveMode('getRelativeCoordinates')); 
+        togglePlaceSnapPointModeButton.addEventListener('click', () => setActiveMode('placeSnapPoint')); 
+        toggleSetCNCOriginModeButton.addEventListener('click', () => setActiveMode('setCNCZeroMode')); 
+        toggleDefineToolPathModeButton.addEventListener('click', () => setActiveMode('defineToolPath')); 
+
+
+        clearSnapPointsButton.addEventListener('click', () => { 
+            if (placedSnapPoints.length === 0) { showInfo('Nessun punto di snap manuale da cancellare.'); return; }
+            confirmClearModalText.textContent = "Sei sicuro di voler cancellare tutti i punti di snap manuali?"; 
+            confirmClearModal.dataset.clearType = 'snapPoints'; 
+            confirmClearModal.classList.add('active');
+        });
+        
+        clearCNCOriginsButton.addEventListener('click', () => {
+            if (cncZeroPoints.length === 0) { showInfo('Nessuna origine CNC da cancellare.'); return; }
+            confirmClearModalText.textContent = `Sei sicuro di voler cancellare tutte le ${cncZeroPoints.length} origini CNC definite?`;
+            confirmClearModal.dataset.clearType = 'cncOrigins';
+            confirmClearModal.classList.add('active');
+        });
+        clearGCodePointsButton.addEventListener('click', () => {
+            if (gCodePoints.length === 0) { showInfo('Nessun punto G-Code da cancellare.'); return; }
+            confirmClearModalText.textContent = `Sei sicuro di voler cancellare tutti i ${gCodePoints.length} punti G-Code visualizzati?`;
+            confirmClearModal.dataset.clearType = 'gCodePoints';
+            confirmClearModal.classList.add('active');
+        });
+        clearToolPathButton.addEventListener('click', () => { 
+            if (toolPathPoints.length === 0) { showInfo('Nessun percorso fresa da cancellare.'); return; }
+            confirmClearModalText.textContent = `Sei sicuro di voler cancellare tutti i ${toolPathPoints.length} punti del percorso fresa?`;
+            confirmClearModal.dataset.clearType = 'toolPath';
+            confirmClearModal.classList.add('active');
+        });
+        clearBoltCirclePointsButton.addEventListener('click', () => {
+            if (boltCircleSets.length === 0) { showInfo('Nessun foro da circonferenza da cancellare.'); return; }
+            confirmClearModalText.textContent = `Sei sicuro di voler cancellare tutti i ${boltCircleSets.length} set di fori da circonferenza?`;
+            confirmClearModal.dataset.clearType = 'boltCircleSets';
+            confirmClearModal.classList.add('active');
+        });
+
+
+        zoomInButton.addEventListener('click', () => {
+            if (!currentImage) return;
+            const centerCanvasX = drawingCanvas.width / 2; const centerCanvasY = drawingCanvas.height / 2;
+            const centerImgX_before = (centerCanvasX - panOffsetX) / zoomLevel; const centerImgY_before = (centerCanvasY - panOffsetY) / zoomLevel;
+            zoomLevel = Math.min(maxZoom, zoomLevel * 1.25);
+            panOffsetX = centerCanvasX - centerImgX_before * zoomLevel; panOffsetY = centerCanvasY - centerImgY_before * zoomLevel;
+            updateUIDisplays(); redrawCanvas();
+        });
+        zoomOutButton.addEventListener('click', () => {
+            if (!currentImage) return;
+            const centerCanvasX = drawingCanvas.width / 2; const centerCanvasY = drawingCanvas.height / 2;
+            const centerImgX_before = (centerCanvasX - panOffsetX) / zoomLevel; const centerImgY_before = (centerCanvasY - panOffsetY) / zoomLevel;
+            zoomLevel = Math.max(minZoom, zoomLevel / 1.25);
+            panOffsetX = centerCanvasX - mouseImgX_before * zoomLevel; panOffsetY = centerCanvasY - mouseImgY_before * zoomLevel;
+            updateUIDisplays(); redrawCanvas();
+        });
+        resetZoomButton.addEventListener('click', () => { if (!currentImage) return; resetZoomAndPan(); });
+
+        clearBolliniButton.addEventListener('click', () => { 
+            if (placedBollini.length === 0 && !currentImage ) { showInfo('Nessun bollino da cancellare o immagine non caricata.'); return; }
+            confirmClearModalText.textContent = "Sei sicuro di voler cancellare tutti i bollini posizionati sul disegno?"; 
+            confirmClearModal.dataset.clearType = 'bollini';
+            confirmClearModal.classList.add('active');
+        });
+        confirmClearYes.addEventListener('click', () => {
+            const clearType = confirmClearModal.dataset.clearType;
+            switch(clearType) {
+                case 'bollini': placedBollini = []; showInfo('Tutti i bollini del disegno sono stati cancellati.'); break;
+                case 'customTable': customTableEntries = []; renderCustomTable(); showInfo('Tutte le righe della tabella personalizzata sono state cancellate.'); break;
+                case 'snapPoints': placedSnapPoints = []; showInfo('Tutti i punti di snap manuali sono stati cancellati.'); break;
+                case 'cncOrigins': cncZeroPoints = []; showInfo('Tutte le origini CNC sono state cancellate.'); populateToolPathOriginSelect(); break;
+                case 'gCodePoints': gCodePoints = []; showInfo('Tutti i punti G-Code sono stati cancellati.'); break;
+                case 'toolPath': toolPathPoints = []; renderToolPathTable(); showInfo('Tutti i punti del percorso fresa sono stati cancellati.'); break;
+                case 'boltCircleSets': boltCircleSets = []; showInfo('Tutti i fori da circonferenza sono stati cancellati.'); break;
+            }
+            confirmClearModal.classList.remove('active'); 
+            redrawCanvas(); updateUIDisplays();
+        });
+        confirmClearNo.addEventListener('click', () => confirmClearModal.classList.remove('active'));
+        confirmClearModal.addEventListener('click', (e) => { if (e.target === confirmClearModal) confirmClearNo.click(); });
+
+        exportButton.addEventListener('click', () => {
+            if (!currentImage || !currentImage.complete || currentImage.naturalWidth === 0) { showInfo('Carica un\'immagine valida prima di esportare.'); return; }
+            const hasElementsToExport = placedBollini.length > 0 || customOriginPoint || placedSnapPoints.length > 0 || cncZeroPoints.length > 0 || gCodePoints.length > 0 || toolPathPoints.length > 0 || boltCircleSets.length > 0;
+            if (!hasElementsToExport) { showInfo('Nessun elemento (bollini, origini, punti, ecc.) da esportare sul disegno.'); return; }
+            
+            showInfo('Preparazione immagine per l\'export...'); loader.style.display = 'block';
+            setTimeout(() => {
+                try {
+                    const exportCanvas = document.createElement('canvas');
+                    exportCanvas.width = currentImage.naturalWidth; exportCanvas.height = currentImage.naturalHeight;
+                    const exportCtx = exportCanvas.getContext('2d');
+
+                    if (currentImageFileType === 'image/svg+xml' || currentImageFileType === 'application/pdf') {
+                        exportCtx.fillStyle = 'white';
+                        exportCtx.fillRect(0, 0, currentImage.naturalWidth, currentImage.naturalHeight);
+                    }
+
+                    exportCtx.drawImage(currentImage, 0, 0, currentImage.naturalWidth, currentImage.naturalHeight);
+                    
+                    // --- Esportazione di tutti gli elementi grafici ---
+                     if (customOriginPoint) {
+                        const radius = ORIGIN_MARKER_RADIUS_IMG_PX; 
+                        exportCtx.beginPath(); exportCtx.arc(customOriginPoint.x, customOriginPoint.y, radius, 0, 2 * Math.PI);
+                        exportCtx.fillStyle = ORIGIN_MARKER_COLOR_FILL; exportCtx.fill();
+                        exportCtx.strokeStyle = ORIGIN_MARKER_COLOR_STROKE; exportCtx.lineWidth = 1.5; exportCtx.stroke();
+                        exportCtx.beginPath();
+                        exportCtx.moveTo(customOriginPoint.x - radius * 0.6, customOriginPoint.y); exportCtx.lineTo(customOriginPoint.x + radius * 0.6, customOriginPoint.y);
+                        exportCtx.moveTo(customOriginPoint.x, customOriginPoint.y - radius * 0.6); exportCtx.lineTo(customOriginPoint.x, customOriginPoint.y + radius * 0.6);
+                        exportCtx.strokeStyle = 'white'; exportCtx.lineWidth = 1; exportCtx.stroke();
+                    }
+                    cncZeroPoints.forEach((cncOrigin, index) => {
+                        const radius = CNC_ORIGIN_MARKER_BASE_RADIUS_IMG_PX;
+                        const color = cncOrigin.color || getCNCOriginColor(index);
+                        exportCtx.strokeStyle = color; exportCtx.fillStyle = color; exportCtx.lineWidth = 2;
+                        exportCtx.beginPath();
+                        exportCtx.moveTo(cncOrigin.x - radius, cncOrigin.y); exportCtx.lineTo(cncOrigin.x + radius, cncOrigin.y);
+                        exportCtx.moveTo(cncOrigin.x, cncOrigin.y - radius); exportCtx.lineTo(cncOrigin.x, cncOrigin.y + radius);
+                        exportCtx.stroke();
+                        exportCtx.beginPath(); exportCtx.arc(cncOrigin.x, cncOrigin.y, radius * 0.3, 0, 2 * Math.PI); exportCtx.fill();
+                        exportCtx.font = `bold ${CNC_ORIGIN_TEXT_SIZE_IMG_PX}px Arial`; exportCtx.textAlign = 'left'; exportCtx.textBaseline = 'bottom';
+                        exportCtx.fillText(cncOrigin.name, cncOrigin.x + radius * 0.5, cncOrigin.y - radius * 0.5);
+                    });
+                     gCodePoints.forEach(point => {
+                        const radius = GCODE_POINT_RADIUS_IMG_PX;
+                        exportCtx.beginPath();
+                        if (point.type === 'G00_END') {
+                            exportCtx.strokeStyle = GCODE_POINT_G00_COLOR; exportCtx.fillStyle = GCODE_POINT_G00_COLOR;
+                            exportCtx.arc(point.x, point.y, radius, 0, 2 * Math.PI); exportCtx.fill();
+                        } else if (point.type === 'DRILL_CYCLE') {
+                            exportCtx.strokeStyle = GCODE_POINT_DRILL_COLOR; exportCtx.lineWidth = 1.5;
+                            exportCtx.moveTo(point.x - radius * 1.5, point.y); exportCtx.lineTo(point.x + radius * 1.5, point.y);
+                            exportCtx.moveTo(point.x, point.y - radius * 1.5); exportCtx.lineTo(point.x, point.y + radius * 1.5);
+                            exportCtx.stroke();
+                        }
+                    });
+                     boltCircleSets.forEach(set => {
+                        let radiusPx = set.radius;
+                        if (worldScaleFactor && set.unit !== 'px') { radiusPx = set.radius * worldScaleFactor; }
+                        exportCtx.beginPath();
+                        exportCtx.arc(set.centerX, set.centerY, radiusPx, 0, 2 * Math.PI);
+                        exportCtx.strokeStyle = BOLT_CIRCLE_REF_LINE_COLOR; exportCtx.lineWidth = 1;
+                        exportCtx.setLineDash([4, 4]); exportCtx.stroke(); exportCtx.setLineDash([]);
+                        set.points.forEach(p => {
+                            const radius = BOLT_CIRCLE_POINT_RADIUS_IMG_PX;
+                            exportCtx.beginPath();
+                            exportCtx.arc(p.x, p.y, radius, 0, 2 * Math.PI);
+                            exportCtx.fillStyle = BOLT_CIRCLE_POINT_COLOR; exportCtx.fill();
+                        });
+                    });
+                    if (toolPathPoints.length > 0) {
+                        if (showToolPathLines && toolPathPoints.length > 1) {
+                            exportCtx.beginPath();
+                            exportCtx.moveTo(toolPathPoints[0].imgX, toolPathPoints[0].imgY);
+                            for (let i = 1; i < toolPathPoints.length; i++) {
+                                exportCtx.lineTo(toolPathPoints[i].imgX, toolPathPoints[i].imgY);
+                            }
+                            exportCtx.strokeStyle = TOOL_PATH_LINE_COLOR; exportCtx.lineWidth = 1.5; exportCtx.stroke();
+                        }
+                        toolPathPoints.forEach(point => {
+                            let toolRadiusImgPxExport;
+                             if (worldScaleFactor && virtualToolDiameter > 0) { toolRadiusImgPxExport = (virtualToolDiameter / 2) * worldScaleFactor; } 
+                             else if (virtualToolDiameter > 0) { toolRadiusImgPxExport = virtualToolDiameter / 2; } 
+                             else { toolRadiusImgPxExport = POINT_INDICATOR_RADIUS_IMG_PX * 0.8; }
+                             if (toolRadiusImgPxExport > 0 && virtualToolDiameter > 0) {
+                                exportCtx.beginPath(); exportCtx.arc(point.imgX, point.imgY, toolRadiusImgPxExport, 0, 2 * Math.PI);
+                                exportCtx.fillStyle = VIRTUAL_TOOL_COLOR; exportCtx.fill();
+                             }
+                             if (showToolPathLines || toolPathPoints.length === 1){
+                                const centerDotRadiusExport = POINT_INDICATOR_RADIUS_IMG_PX * 0.5;
+                                exportCtx.beginPath(); exportCtx.arc(point.imgX, point.imgY, centerDotRadiusExport, 0, 2 * Math.PI);
+                                exportCtx.fillStyle = TOOL_PATH_POINT_COLOR; exportCtx.fill();
+                             }
+                        });
+                    }
+                    placedSnapPoints.forEach(p => {
+                        const radius = MANUAL_SNAP_POINT_RADIUS_IMG_PX; 
+                        exportCtx.strokeStyle = MANUAL_SNAP_POINT_COLOR; exportCtx.lineWidth = 1.5; exportCtx.beginPath();
+                        exportCtx.moveTo(p.x - radius, p.y); exportCtx.lineTo(p.x + radius, p.y);
+                        exportCtx.moveTo(p.x, p.y - radius); exportCtx.lineTo(p.x, p.y + radius); exportCtx.stroke();
+                    });
+                    const exportBollinoRadius = BOLLINO_DEFAULT_RADIUS_IMG_PX * bollinoScaleFactor; 
+                    const exportFontSize = exportBollinoRadius * TEXT_SIZE_TO_ACTUAL_RADIUS_RATIO; 
+                    placedBollini.forEach(bollino => { drawBollinoOnContext(exportCtx, bollino.letter, bollino.x, bollino.y, true, exportBollinoRadius, exportFontSize); });
+                    
+                    const dataURL = exportCanvas.toDataURL('image/png');
+                    const link = document.createElement('a'); link.href = dataURL; link.download = 'disegno_annotato_completo.png';
+                    document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    showInfo('Immagine esportata con successo!');
+                } catch (err) { console.error("Errore export:", err); showInfo('Errore esportazione immagine.'); }
+                finally { loader.style.display = 'none'; }
+            }, 50);
+        });
+
+        function escapeCSV(text) {
+            if (text === undefined || text === null) return ""; let str = String(text);
+            if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) { str = '"' + str.replace(/"/g, '""') + '"'; } return str;
+        };
+
+        function exportAllDataToCSV() { 
+            if (!currentImage || !currentImage.complete || currentImage.naturalWidth === 0) { showInfo('Carica un\'immagine valida prima di esportare i dati.'); return; }
+            const hasAnyData = placedBollini.length > 0 || toolPathPoints.length > 0 || boltCircleSets.length > 0;
+            if (!hasAnyData) { showInfo('Nessun dato (bollini, percorso fresa, fori circ.) da esportare.'); return; }
+
+            showInfo('Preparazione dati CSV generali...'); loader.style.display = 'block';
+            setTimeout(() => {
+                try {
+                    let csvString = "";
+                    if (placedBollini.length > 0) {
+                        const bolliniHeaders = ["Tipo Dato", "Etichetta Bollino", "X Immagine (px)", "Y Immagine (px)", 
+                                         "X Rel. Origine Disegno (px)", "Y Rel. Origine Disegno (px)", 
+                                         "X Rel. Origine Disegno ("+worldScaleUnit+")", "Y Rel. Origine Disegno ("+worldScaleUnit+")"];
+                        cncZeroPoints.forEach(origin => {
+                            bolliniHeaders.push(`X Rel. ${origin.name} (px)`); bolliniHeaders.push(`Y Rel. ${origin.name} (px)`);
+                            bolliniHeaders.push(`X Rel. ${origin.name} (${worldScaleUnit})`); bolliniHeaders.push(`Y Rel. ${origin.name} (${worldScaleUnit})`);
+                        });
+                        bolliniHeaders.push("Descrizione Associata", "Tolleranza (da CSV)", "Misurato (da CSV)");
+                        const bolliniRows = [bolliniHeaders.join(',')];
+                        placedBollini.forEach(bollino => { 
+                            let rowData = ["Bollino", escapeCSV(bollino.letter), bollino.x.toFixed(2), bollino.y.toFixed(2)];
+                            if(customOriginPoint) {
+                                rowData.push((bollino.x - customOriginPoint.x).toFixed(2), (bollino.y - customOriginPoint.y).toFixed(2));
+                                if(worldScaleFactor) {
+                                    rowData.push(roundToFirstDecimal((bollino.x - customOriginPoint.x) / worldScaleFactor));
+                                    rowData.push(roundToFirstDecimal(-((bollino.y - customOriginPoint.y) / worldScaleFactor))); 
+                                } else { rowData.push('', '');}
+                            } else { rowData.push('', '', '', ''); }
+                            cncZeroPoints.forEach(origin => {
+                                rowData.push((bollino.x - origin.x).toFixed(2), (bollino.y - origin.y).toFixed(2));
+                                if(worldScaleFactor) {
+                                    rowData.push(roundToFirstDecimal((bollino.x - origin.x) / worldScaleFactor));
+                                    rowData.push(roundToFirstDecimal(-((bollino.y - origin.y) / worldScaleFactor))); 
+                                } else { rowData.push('', ''); }
+                            });
+                            rowData.push(escapeCSV(bollino.text), escapeCSV(bollino.tolleranza), escapeCSV(bollino.misurato));
+                            bolliniRows.push(rowData.map(escapeCSV).join(','));
+                        });
+                        csvString += "Dati Bollini:\n" + bolliniRows.join('\n') + "\n\n";
+                    }
+
+                    if (boltCircleSets.length > 0) {
+                        const bcHeaders = ["Tipo Dato", "Set #", "Punto #", "X Immagine (px)", "Y Immagine (px)", "Centro X (px)", "Centro Y (px)", "Raggio ("+worldScaleUnit+")", "Angolo Iniziale (°)", "# Fori Totali"];
+                        const bcRows = [bcHeaders.join(',')];
+                        boltCircleSets.forEach((set, setIndex) => {
+                            set.points.forEach((point, pointIndex) => {
+                                let row = ["Foro Circonferenza", setIndex + 1, pointIndex + 1, point.x.toFixed(2), point.y.toFixed(2), set.centerX.toFixed(2), set.centerY.toFixed(2), set.radius.toFixed(3), set.startAngle, set.numHoles];
+                                bcRows.push(row.map(escapeCSV).join(','));
+                            });
+                        });
+                        csvString += "Dati Fori su Circonferenza:\n" + bcRows.join('\n') + "\n\n";
+                    }
+
+
+                    if (toolPathPoints.length > 0) {
+                        const toolPathHeaders = ["Tipo Dato", "Punto #", "X Immagine (px)", "Y Immagine (px)", 
+                                                 "Origine Riferimento", "X Relativa ("+(worldScaleFactor ? worldScaleUnit : "px")+")", "Y Relativa ("+(worldScaleFactor ? worldScaleUnit : "px")+")"];
+                        const toolPathCsvRows = [toolPathHeaders.join(',')];
+                        toolPathPoints.forEach((point, index) => {
+                            const row = ["PercorsoFresa", index + 1, point.imgX.toFixed(2), point.imgY.toFixed(2),
+                                         escapeCSV(point.refOriginName), 
+                                         point.relX.toFixed(worldScaleFactor ? 3 : 1), 
+                                         point.relY.toFixed(worldScaleFactor ? 3 : 1)  
+                                        ];
+                            toolPathCsvRows.push(row.map(escapeCSV).join(','));
+                        });
+                        csvString += "Dati Percorso Fresa:\n" + toolPathCsvRows.join('\n') + "\n";
+                    }
+
+
+                    const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a'); const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url); link.setAttribute('download', 'dati_generali_disegno.csv');
+                    link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    showInfo('Dati generali esportati con successo in CSV!');
+                } catch (err) { console.error("Errore export CSV generale:", err); showInfo('Errore esportazione dati generali.'); }
+                finally { loader.style.display = 'none'; }
+            }, 50);
+        }
+        exportDataButton.addEventListener('click', exportAllDataToCSV); 
+
+        function exportDimensionsTableToCSV() {
+            if (dimensionData.length === 0) { showInfo('Nessun dato nelle quote da CSV da esportare.'); return; }
+            showInfo('Preparazione dati CSV delle quote...'); loader.style.display = 'block';
+            setTimeout(() => {
+                try {
+                    const headers = ["Lettera", "Testo completo rilevato", "Tolleranza", "Misurato"];
+                    const csvRows = [headers.join(',')];
+                    dimensionData.forEach(dim => {
+                        const row = [escapeCSV(dim.Lettera), escapeCSV(dim['Testo completo rilevato']), escapeCSV(dim.tolleranza), escapeCSV(dim.misurato)];
+                        csvRows.push(row.join(','));
+                    });
+                    const csvString = csvRows.join('\n');
+                    const blob = new Blob(['\uFEFF' + csvString], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a'); const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url); link.setAttribute('download', 'dati_quote_csv_editate.csv');
+                    link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    showInfo('Dati quote CSV esportati con successo!');
+                } catch (err) { console.error("Errore export CSV quote:", err); showInfo('Errore esportazione dati quote CSV.'); }
+                finally { loader.style.display = 'none'; }
+            }, 50);
+        }
+        exportCsvQuotesButton.addEventListener('click', exportDimensionsTableToCSV);
+
+
+        function renderCustomTable() {
+            customDataTableBody.innerHTML = '';
+            if (customTableEntries.length === 0) { customTablePlaceholder.style.display = 'block'; customDataTableContainer.style.display = 'none'; exportCustomTableButton.style.display = 'none'; return; }
+            customTablePlaceholder.style.display = 'none'; customDataTableContainer.style.display = 'block'; exportCustomTableButton.style.display = 'block';
+            customTableEntries.forEach((entry, index) => {
+                const row = customDataTableBody.insertRow(); row.dataset.index = index;
+                const cellId = row.insertCell(); cellId.textContent = entry.id; cellId.contentEditable = "true";
+                cellId.addEventListener('blur', (e) => updateCustomTableEntry(index, 'id', e.target.textContent));
+                const cellDesc = row.insertCell(); cellDesc.textContent = entry.description; cellDesc.contentEditable = "true";
+                cellDesc.addEventListener('blur', (e) => updateCustomTableEntry(index, 'description', e.target.textContent));
+                const cellNotes = row.insertCell(); cellNotes.textContent = entry.notes; cellNotes.contentEditable = "true";
+                cellNotes.addEventListener('blur', (e) => updateCustomTableEntry(index, 'notes', e.target.textContent));
+                const cellAction = row.insertCell(); const deleteBtn = document.createElement('button');
+                deleteBtn.innerHTML = '<i class="fas fa-times"></i>'; deleteBtn.title = "Elimina Riga";
+                deleteBtn.classList.add('delete-row-btn'); deleteBtn.onclick = () => deleteCustomTableRow(index);
+                cellAction.appendChild(deleteBtn);
+            });
+        }
+        function updateCustomTableEntry(index, field, value) { if (customTableEntries[index]) { customTableEntries[index][field] = value.trim(); } }
+        function addCustomTableRow() { customTableEntries.push({ id: `ID-${customTableEntries.length + 1}`, description: "", notes: "" }); renderCustomTable(); showInfo("Nuova riga aggiunta alla tabella personalizzata. Modifica le celle."); }
+        addCustomTableRowButton.addEventListener('click', addCustomTableRow);
+        function deleteCustomTableRow(index) { customTableEntries.splice(index, 1); renderCustomTable(); showInfo("Riga eliminata dalla tabella personalizzata."); }
+        clearCustomTableButton.addEventListener('click', () => {
+            if (customTableEntries.length === 0) { showInfo('La tabella personalizzata è già vuota.'); return; }
+            confirmClearModalText.textContent = "Sei sicuro di voler cancellare tutte le righe della tabella personalizzata?";
+            confirmClearModal.dataset.clearType = 'customTable';
+            confirmClearModal.classList.add('active');
+        });
+        function exportCustomTableToCSV() {
+            if (customTableEntries.length === 0) { showInfo('Nessun dato nella tabella personalizzata da esportare.'); return; }
+            showInfo('Preparazione dati CSV tabella personalizzata...'); loader.style.display = 'block';
+            setTimeout(() => {
+                try {
+                    const headers = ["ID/Etichetta", "Descrizione", "Note"]; const csvRows = [headers.join(',')];
+                    customTableEntries.forEach(entry => { const row = [escapeCSV(entry.id), escapeCSV(entry.description), escapeCSV(entry.notes)]; csvRows.push(row.join(',')); });
+                    const csvString = csvRows.join('\n'); const blob = new Blob(['\uFEff' + csvString], { type: 'text/csv;charset=utf-8;' });
+                    const link = document.createElement('a'); const url = URL.createObjectURL(blob);
+                    link.setAttribute('href', url); link.setAttribute('download', 'tabella_dati_personalizzata.csv');
+                    link.style.visibility = 'hidden'; document.body.appendChild(link); link.click(); document.body.removeChild(link);
+                    showInfo('Tabella dati personalizzata esportata con successo in CSV!');
+                } catch (err) { console.error("Errore export CSV tabella personalizzata:", err); showInfo('Errore esportazione tabella dati personalizzata.'); }
+                finally { loader.style.display = 'none'; }
+            }, 50);
+        }
+        exportCustomTableButton.addEventListener('click', exportCustomTableToCSV);
+
+        function populateToolPathOriginSelect() {
+            const currentVal = toolPathReferenceOriginSelect.value;
+            toolPathReferenceOriginSelect.innerHTML = '<option value="">-- Seleziona Origine --</option>';
+            let newSelectedIndex = 0;
+            let optionIndex = 1;
+
+            if (customOriginPoint) {
+                const opt = document.createElement('option');
+                opt.value = 'main_drawing_origin';
+                opt.textContent = 'Origine Disegno Principale';
+                toolPathReferenceOriginSelect.appendChild(opt);
+                if (currentVal === opt.value) newSelectedIndex = optionIndex;
+                optionIndex++;
+            }
+            cncZeroPoints.forEach((origin, idx) => {
+                const opt = document.createElement('option');
+                opt.value = `cnc_origin_${idx}`;
+                opt.textContent = `Origine CNC: ${origin.name}`;
+                toolPathReferenceOriginSelect.appendChild(opt);
+                if (currentVal === opt.value) newSelectedIndex = optionIndex;
+                optionIndex++;
+            });
+            toolPathReferenceOriginSelect.selectedIndex = newSelectedIndex;
+            updateActiveToolPathOrigin(); 
+        }
+
+        function updateActiveToolPathOrigin() {
+            const selectedValue = toolPathReferenceOriginSelect.value;
+            if (!selectedValue) {
+                activeToolPathOriginDetails = null;
+                if (activeMode === 'defineToolPath') showInfo("PERCORSO FRESA: Seleziona un'Origine Riferimento.");
+                return;
+            }
+            if (selectedValue === 'main_drawing_origin' && customOriginPoint) {
+                activeToolPathOriginDetails = {
+                    name: 'Origine Disegno', type: 'main',
+                    imgX: customOriginPoint.x, imgY: customOriginPoint.y
+                };
+            } else if (selectedValue.startsWith('cnc_origin_')) {
+                const index = parseInt(selectedValue.split('_')[2], 10);
+                if (cncZeroPoints[index]) {
+                    const cncOrigin = cncZeroPoints[index];
+                    activeToolPathOriginDetails = {
+                        name: cncOrigin.name, type: 'cnc',
+                        imgX: cncOrigin.x, imgY: cncOrigin.y
+                    };
+                } else { activeToolPathOriginDetails = null; }
+            } else { activeToolPathOriginDetails = null; }
+
+            if (activeMode === 'defineToolPath') {
+                if (activeToolPathOriginDetails) {
+                    showInfo(`PERCORSO FRESA (ON): Riferimento '${activeToolPathOriginDetails.name}'. Clicca per aggiungere punti o inserisci manualmente. ALT per Loupe.`);
+                } else {
+                    showInfo("PERCORSO FRESA: Origine riferimento non valida. Selezionane una.");
+                }
+            }
+            redrawCanvas(); 
+        }
+
+        function renderToolPathTable() {
+            toolPathTableBody.innerHTML = '';
+            if (toolPathPoints.length === 0) {
+                toolPathTablePlaceholder.style.display = 'block';
+                toolPathTableContainer.style.display = 'none';
+                return;
+            }
+            toolPathTablePlaceholder.style.display = 'none';
+            toolPathTableContainer.style.display = 'block';
+
+            toolPathPoints.forEach((point, index) => {
+                const row = toolPathTableBody.insertRow();
+                row.insertCell().textContent = index + 1;
+                row.insertCell().textContent = point.refOriginName;
+                const unitSuffix = worldScaleFactor ? ` (${worldScaleUnit})` : ' (px)';
+                row.insertCell().textContent = point.relX.toFixed(worldScaleFactor ? 3 : 1) + unitSuffix;
+                row.insertCell().textContent = point.relY.toFixed(worldScaleFactor ? 3 : 1) + unitSuffix; 
+
+                const actionCell = row.insertCell();
+                const deleteBtn = document.createElement('button');
+                deleteBtn.innerHTML = '<i class="fas fa-times"></i>';
+                deleteBtn.title = "Elimina Punto Percorso";
+                deleteBtn.classList.add('delete-row-btn', 'text-xs', 'p-1');
+                deleteBtn.onclick = () => {
+                    toolPathPoints.splice(index, 1);
+                    renderToolPathTable();
+                    redrawCanvas();
+                    showInfo(`Punto #${index + 1} rimosso dal percorso fresa.`);
+                };
+                actionCell.appendChild(deleteBtn);
+            });
+        }
+        
+        toolPathReferenceOriginSelect.addEventListener('change', updateActiveToolPathOrigin);
+        virtualToolDiameterInput.addEventListener('input', () => {
+            const diam = parseFloat(virtualToolDiameterInput.value);
+            virtualToolDiameter = isNaN(diam) || diam < 0 ? 0 : diam;
+            if (activeMode === 'defineToolPath') redrawCanvas();
+        });
+        showToolPathLinesCheckbox.addEventListener('change', () => {
+            showToolPathLines = showToolPathLinesCheckbox.checked;
+            redrawCanvas();
+        });
+
+        addManualToolPathPointButton.addEventListener('click', () => {
+            if (activeMode !== 'defineToolPath') {
+                showInfo("Attiva prima la 'Modalità Percorso Fresa'."); return;
+            }
+            if (!activeToolPathOriginDetails) {
+                showInfo("ERRORE: Seleziona un'Origine Riferimento per il percorso fresa."); return;
+            }
+            const relX = parseFloat(manualToolPathXInput.value);
+            const relY = parseFloat(manualToolPathYInput.value);
+
+            if (isNaN(relX) || isNaN(relY)) {
+                showInfo("ERRORE: Inserisci valori X e Y numerici validi."); return;
+            }
+
+            let imgX, imgY;
+            if (worldScaleFactor) {
+                imgX = activeToolPathOriginDetails.imgX + (relX * worldScaleFactor);
+                imgY = activeToolPathOriginDetails.imgY - (relY * worldScaleFactor); 
+            } else { 
+                imgX = activeToolPathOriginDetails.imgX + relX;
+                imgY = activeToolPathOriginDetails.imgY - relY; 
+            }
+
+            const newPathPoint = {
+                imgX: imgX, imgY: imgY,
+                relX: relX, relY: relY, 
+                refOriginName: activeToolPathOriginDetails.name,
+                refOriginType: activeToolPathOriginDetails.type,
+                refOriginImgX: activeToolPathOriginDetails.imgX,
+                refOriginImgY: activeToolPathOriginDetails.imgY,
+            };
+            toolPathPoints.push(newPathPoint);
+            renderToolPathTable();
+            redrawCanvas();
+            showInfo(`Punto #${toolPathPoints.length} aggiunto manually al percorso. Riferimento: ${activeToolPathOriginDetails.name}.`);
+            manualToolPathXInput.value = ''; manualToolPathYInput.value = '';
+        });
+
+        function displayChatMessage(messageContent, senderType) {
+            const messageDiv = document.createElement('div'); messageDiv.classList.add('chat-message', senderType);
+            if (typeof messageContent === 'string') { const textElement = document.createElement('p'); textElement.textContent = messageContent; messageDiv.appendChild(textElement); } 
+            else if (typeof messageContent === 'object' && messageContent !== null) {
+                if (messageContent.text) { const textElement = document.createElement('p'); textElement.textContent = messageContent.text; messageDiv.appendChild(textElement); }
+                if (messageContent.imageSrc) { const imgElement = document.createElement('img'); imgElement.src = messageContent.imageSrc; imgElement.alt = messageContent.imageFileName || "Immagine inviata"; messageDiv.appendChild(imgElement); }
+            }
+            aiChatDisplay.appendChild(messageDiv); aiChatDisplay.scrollTop = aiChatDisplay.scrollHeight;
+        }
+        function resetAiChatImageSelection() { currentAiChatImage.base64 = null; currentAiChatImage.mimeType = null; currentAiChatImage.fileName = null; aiChatImagePreview.src = "#"; aiChatImagePreviewContainer.style.display = 'none'; aiChatFileInput.value = ""; }
+        async function handleSendAiPrompt() {
+            const promptText = aiChatPromptInput.value.trim();
+            if (!promptText && !currentAiChatImage.base64) { displayChatMessage("Per favore, inserisci un prompt o allega un'immagine.", "error"); return; }
+            const messageParts = [];
+            if (promptText) { messageParts.push({ text: promptText }); }
+            if (currentAiChatImage.base64 && currentAiChatImage.mimeType) { messageParts.push({ inlineData: { mimeType: currentAiChatImage.mimeType, data: currentAiChatImage.base64 } }); }
+            const userMessageForDisplay = {};
+            if (promptText) userMessageForDisplay.text = promptText;
+            if (currentAiChatImage.base64) { userMessageForDisplay.imageSrc = `data:${currentAiChatImage.mimeType};base64,${currentAiChatImage.base64}`; userMessageForDisplay.imageFileName = currentAiChatImage.fileName; }
+            displayChatMessage(userMessageForDisplay, "user"); aiChatHistory.push({ role: "user", parts: messageParts });
+            aiChatPromptInput.value = ""; resetAiChatImageSelection();
+            aiChatLoader.style.display = 'block'; sendAiPromptButton.disabled = true; attachAiFileButton.disabled = true;
+            const payload = { contents: aiChatHistory }; const apiKey = ""; 
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro-vision:generateContent?key=${apiKey}`; 
+            try {
+                const response = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!response.ok) { 
+                    const errorData = await response.json(); 
+                    let detailedErrorMsg = `Errore API (${response.status}): ${errorData.error?.message || response.statusText}`;
+                    if(errorData.error?.details) detailedErrorMsg += ` Dettagli: ${JSON.stringify(errorData.error.details)}`;
+                    throw new Error(detailedErrorMsg); 
+                }
+                const result = await response.json();
+                if (result.candidates && result.candidates.length > 0 && result.candidates[0].content && result.candidates[0].content.parts && result.candidates[0].content.parts.length > 0) {
+                    const aiResponseText = result.candidates[0].content.parts[0].text;
+                    displayChatMessage(aiResponseText, "ai"); aiChatHistory.push({ role: "model", parts: [{ text: aiResponseText }] });
+                } else { 
+                    let noResponseMsg = "L'AI non ha fornito una risposta valida.";
+                    if(result.promptFeedback && result.promptFeedback.blockReason){
+                         noResponseMsg += ` Motivo: ${result.promptFeedback.blockReason}.`;
+                         if(result.promptFeedback.safetyRatings) noResponseMsg += ` Safety Ratings: ${JSON.stringify(result.promptFeedback.safetyRatings)}`;
+                    }
+                    displayChatMessage(noResponseMsg, "error"); 
+                    if(aiChatHistory.length > 0 && aiChatHistory[aiChatHistory.length -1].role === "user") { aiChatHistory.pop(); }
+                }
+            } catch (error) { displayChatMessage(`Si è verificato un errore: ${error.message}`, "error"); if(aiChatHistory.length > 0 && aiChatHistory[aiChatHistory.length -1].role === "user") { aiChatHistory.pop(); }}
+            finally { aiChatLoader.style.display = 'none'; sendAiPromptButton.disabled = false; attachAiFileButton.disabled = false; aiChatPromptInput.focus(); }
+        }
+        openAiChatButton.addEventListener('click', () => {
+            aiChatModal.classList.add('active');
+            if (aiChatDisplay.children.length === 0) { displayChatMessage("Ciao! Come posso aiutarti oggi? Puoi inviarmi testo e immagini.", "ai"); aiChatHistory = [{ role: "model", parts: [{text: "Ciao! Come posso aiutarti oggi? Puoi inviarmi testo e immagini."}]}];}
+            aiChatPromptInput.focus();
+        });
+        closeAiChatButton.addEventListener('click', () => { aiChatModal.classList.remove('active'); resetAiChatImageSelection(); });
+        aiChatModal.addEventListener('click', (event) => { if (event.target === aiChatModal) { aiChatModal.classList.remove('active'); resetAiChatImageSelection(); }});
+        attachAiFileButton.addEventListener('click', () => { aiChatFileInput.click(); });
+        aiChatFileInput.addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (file && file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = (e) => { currentAiChatImage.base64 = e.target.result.split(',')[1]; currentAiChatImage.mimeType = file.type; currentAiChatImage.fileName = file.name; aiChatImagePreview.src = e.target.result; aiChatImagePreviewContainer.style.display = 'block'; };
+                reader.readAsDataURL(file);
+            } else if (file) { displayChatMessage("Formato file non supportato per la chat.", "error"); resetAiChatImageSelection(); }
+        });
+        removeAiChatImageButton.addEventListener('click', () => { resetAiChatImageSelection(); });
+        sendAiPromptButton.addEventListener('click', handleSendAiPrompt);
+        aiChatPromptInput.addEventListener('keypress', (event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); handleSendAiPrompt(); }});
+
+        // --- Gestione Bolt Circle Calculator ---
+        function handleBoltCircleCalculation() {
+             const numHoles = parseInt(boltCircleNumHoles.value) || 0;
+            const startAngle = parseFloat(boltCircleStartAngle.value) || 0;
+            const centerX = parseFloat(boltCircleCenterX.value) || 0;
+            const centerY = parseFloat(boltCircleCenterY.value) || 0;
+            let radius = parseFloat(boltCircleRadius.value) || 0;
+            
+            // Preview Canvas
+            const w = boltCirclePreviewCanvas.width;
+            const h = boltCirclePreviewCanvas.height;
+            boltCirclePreviewCtx.fillStyle = '#2d3748';
+            boltCirclePreviewCtx.fillRect(0, 0, w, h);
+
+            // Table Body
+            boltCircleResultsTableBody.innerHTML = '';
+            lastCalculatedBcPoints = [];
+            generateBoltCircleButton.disabled = true;
+            copyBoltCircleTableButton.disabled = true;
+
+            if (numHoles < 1 || radius <= 0 || isNaN(centerX) || isNaN(centerY)) {
+                boltCircleResultsTableBody.innerHTML = '<tr><td colspan="3" class="p-4 text-center text-gray-400 text-xs">Inserire valori validi.</td></tr>';
+                return;
+            }
+
+            let radiusPx = radius;
+            const unit = worldScaleFactor ? worldScaleUnit : 'px';
+            if (worldScaleFactor && unit !== 'px') {
+                radiusPx = radius * worldScaleFactor;
+            }
+
+            const previewRadius = w * 0.4;
+            const previewHoleRadius = Math.max(2, Math.min(6, w / (numHoles * 2)));
+
+            boltCirclePreviewCtx.beginPath();
+            boltCirclePreviewCtx.arc(w/2, h/2, previewRadius, 0, 2 * Math.PI);
+            boltCirclePreviewCtx.strokeStyle = 'rgba(107, 114, 128, 0.5)';
+            boltCirclePreviewCtx.stroke();
+
+            for (let i = 0; i < numHoles; i++) {
+                const angleDeg = startAngle + i * (360 / numHoles);
+                const angleRad = angleDeg * (Math.PI / 180);
+
+                // For drawing
+                const x = centerX + radiusPx * Math.cos(angleRad);
+                const y = centerY + radiusPx * Math.sin(angleRad);
+                lastCalculatedBcPoints.push({ x, y });
+
+                // For preview
+                const prev_x = w/2 + previewRadius * Math.cos(angleRad);
+                const prev_y = h/2 + previewRadius * Math.sin(angleRad);
+                boltCirclePreviewCtx.beginPath();
+                boltCirclePreviewCtx.arc(prev_x, prev_y, previewHoleRadius, 0, 2 * Math.PI);
+                boltCirclePreviewCtx.fillStyle = BOLT_CIRCLE_POINT_COLOR;
+                boltCirclePreviewCtx.fill();
+                
+                // For table
+                const row = boltCircleResultsTableBody.insertRow();
+                row.innerHTML = `
+                    <td class="p-2 text-left text-xs text-gray-400">${i+1}</td>
+                    <td class="p-2 text-right text-xs font-mono text-gray-200">${x.toFixed(3)}</td>
+                    <td class="p-2 text-right text-xs font-mono text-gray-200">${y.toFixed(3)}</td>
+                `;
+            }
+            generateBoltCircleButton.disabled = false;
+            copyBoltCircleTableButton.disabled = false;
+        }
+
+        openBoltCircleCalculatorButton.addEventListener('click', () => {
+            if (!currentImage) { showInfo("Carica prima un disegno."); return; }
+            radiusUnitLabel.textContent = worldScaleFactor ? worldScaleUnit : 'px';
+            lastCalculatedBcPoints = [];
+            boltCircleResultsTableBody.innerHTML = '<tr><td colspan="3" class="p-4 text-center text-gray-400 text-xs">Premi "Calcola e Mostra".</td></tr>';
+            generateBoltCircleButton.disabled = true;
+            copyBoltCircleTableButton.disabled = true;
+            handleBoltCircleCalculation(); // Disegna anteprima vuota
+            boltCircleModal.classList.add('active');
+        });
+        
+        calculateBoltCircleButton.addEventListener('click', handleBoltCircleCalculation);
+        
+        pickBoltCircleCenterButton.addEventListener('click', () => {
+            boltCircleModal.classList.remove('active');
+            setActiveMode('pickBoltCircleCenter');
+        });
+
+        generateBoltCircleButton.addEventListener('click', () => {
+            if(lastCalculatedBcPoints.length === 0) {
+                 showInfo("Nessun punto calcolato da aggiungere. Premi prima 'Calcola e Mostra'.");
+                 return;
+            }
+             const set = {
+                centerX: parseFloat(boltCircleCenterX.value) || 0,
+                centerY: parseFloat(boltCircleCenterY.value) || 0,
+                radius: parseFloat(boltCircleRadius.value) || 0,
+                numHoles: parseInt(boltCircleNumHoles.value) || 0,
+                startAngle: parseFloat(boltCircleStartAngle.value) || 0,
+                unit: worldScaleFactor ? worldScaleUnit : 'px',
+                points: lastCalculatedBcPoints
+            };
+            boltCircleSets.push(set);
+            showInfo(`${lastCalculatedBcPoints.length} fori generati e aggiunti al disegno.`);
+            boltCircleModal.classList.remove('active');
+            redrawCanvas();
+        });
+        
+        copyBoltCircleTableButton.addEventListener('click', () => {
+            const rows = boltCircleResultsTableBody.querySelectorAll('tr');
+            if (rows.length === 0 || rows[0].children.length < 3) return;
+            let dataString = "Foro\tX (img px)\tY (img px)\n";
+            rows.forEach(row => {
+                const cols = row.querySelectorAll('td');
+                dataString += `${cols[0].innerText}\t${cols[1].innerText}\t${cols[2].innerText}\n`;
+            });
+            const textArea = document.createElement("textarea");
+            textArea.value = dataString;
+            document.body.appendChild(textArea);
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                copyBcMessage.classList.remove('opacity-0');
+                setTimeout(() => { copyBcMessage.classList.add('opacity-0'); }, 2000);
+            } catch (err) { console.error('Errore copia tabella', err); }
+            document.body.removeChild(textArea);
+        });
+
+        cancelBoltCircleButton.addEventListener('click', () => {
+             boltCircleModal.classList.remove('active');
+             setActiveMode(null);
+        });
+
+        // --- Gestione del pulsante ChatGPT Esterno ---
+        openExternalChatGPTButton.addEventListener('click', () => {
+            window.open(CHATGPT_SHARED_LINK, '_blank');
+            showInfo('Aperta la tua conversazione ChatGPT sui cataloghi utensili.');
+        });
+
+        document.addEventListener('DOMContentLoaded', function() {
+            setupCanvasLayout(); 
+            updateUIDisplays(); 
+            populateTable(); 
+            renderCustomTable(); 
+            renderToolPathTable(); 
+            populateToolPathOriginSelect(); 
+            showToolPathLines = showToolPathLinesCheckbox.checked; 
+            virtualToolDiameter = parseFloat(virtualToolDiameterInput.value) || 1; 
+            showInfo('Benvenuto! App v7.4 con calcolo fori e tabella risultati. Carica un disegno, annota o usa i nuovi strumenti.');
+        });
+        window.addEventListener('resize', () => { setupCanvasLayout(); redrawCanvas(); });
+        exportCsvQuotesButton.style.display = 'none';
+        exportCustomTableButton.style.display = 'none';
+    </script>
+</body>
+</html>
